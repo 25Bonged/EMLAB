@@ -1,0 +1,43 @@
+# ── Dependencies / build artifacts (regenerated per machine) ──
+node_modules/
+**/node_modules/
+.venv/
+backend/.venv/
+__pycache__/
+**/__pycache__/
+dist/
+dist-ssr/
+*.egg-info/
+
+# ── Confidential emission data — NEVER commit ──
+# Real OEM/FEV test reports, compiled results, and the database built from them.
+# These live on the engineering machines, not in source control.
+OneDrive_*/
+*.xlsm
+STLA_Emission_Result_Compile.xlsx
+backend/data/
+**/emissions.db
+**/emissions.db.*
+outputs/
+.workbook_inspection/
+
+# ── Logs ──
+logs/
+*.log
+backend/logs/
+
+# ── OS / editor cruft ──
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ── Local env / secrets ──
+*.local
+.env
+.env.*
+
+# root node_modules is a symlink into a runtime cache — never track it
+/node_modules
