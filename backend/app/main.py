@@ -37,8 +37,10 @@ def require_local(request: Request) -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # The library is sourced exclusively from real reports ingested by the
-    # folder watcher — no seed/demo data is ever loaded.
-    watcher.scan_once()
+    # folder watcher — no seed/demo data is ever loaded. The initial scan runs
+    # inside the watcher thread (which scans immediately on its first iteration)
+    # so a large backlog of files does not block the server from accepting
+    # connections at startup.
     watcher.start()
     yield
     watcher.stop()

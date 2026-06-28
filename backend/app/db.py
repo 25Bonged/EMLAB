@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -72,6 +73,9 @@ POLLUTANT_UNITS = {
     "CH4": "mg/km", "NMHC": "mg/km", "PM": "mg/km", "PN": "#/km",
 }
 
+# Run timestamp embedded in source filenames, e.g. ..._2026-03-18_09-51-01_...
+_RUN_TS = re.compile(r"(\d{4}-\d{2}-\d{2})[ _T](\d{2}-\d{2}-\d{2})")
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -103,10 +107,14 @@ class Database:
             str(test.get("date") or "").strip(),
             str(test.get("cycle") or "").strip().lower(),
         ]
-        raw = "|".join(fields)
         if sum(bool(x) for x in fields) < 3:
-            raw = f"stem|{fallback_stem.lower()}"
-        return raw
+            return f"stem|{fallback_stem.lower()}"
+        # Include the run time-of-day so two distinct runs of the same vehicle and
+        # cycle on the same calendar day are not collapsed into one record (the
+        # `date` field is day-only). The timestamp lives in the source filename.
+        match = _RUN_TS.search(fallback_stem or "")
+        run_ts = f"{match.group(1)}_{match.group(2)}" if match else ""
+        return "|".join(fields + [run_ts])
 
     @staticmethod
     def test_id(identity_key: str) -> str:
@@ -225,6 +233,16 @@ class Database:
                 (test_id, stem, kind, str(path), sha256, stat.st_size, stat.st_mtime_ns, now, now),
             )
 
+    def source_meta(self, path: str) -> dict[str, Any] | None:
+        """Stored size/mtime/digest for a source file, so the watcher can skip
+        re-hashing files that have not changed since the last scan."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT sha256, size_bytes, modified_ns FROM source_files WHERE path=?",
+                (path,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def source_path(self, test_id: str, kind: str) -> Path | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -270,6 +288,13 @@ class Database:
 
     def delete_test(self, test_id: str) -> bool:
         with self.connect() as conn:
+            # Tombstone the ingestion job (while test_id is still set) so the
+            # folder watcher does not silently re-ingest the same unchanged
+            # source on the next scan. Re-dropping a changed file revives it.
+            conn.execute(
+                "UPDATE ingestion_jobs SET status='deleted', updated_at=? WHERE test_id=?",
+                (utcnow(), test_id),
+            )
             cursor = conn.execute("DELETE FROM tests WHERE id=?", (test_id,))
         return cursor.rowcount > 0
 

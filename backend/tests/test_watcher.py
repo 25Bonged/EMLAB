@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -80,6 +81,58 @@ class WatcherTests(unittest.TestCase):
         self.watcher.scan_once()
         self.assertEqual(parser.call_count, 2)
         self.assertEqual(len(self.db.audit(test_id)), 1)
+
+    @patch("app.watcher.parse_pair", return_value=parsed_test())
+    def test_same_day_repeat_runs_stay_distinct(self, parser):
+        # Same vehicle, VN, cycle, and calendar day — two runs differing only by
+        # the time in the filename must produce two records, not one overwriting
+        # the other.
+        for ts in ("09-51-01", "15-22-40"):
+            stem = f"CITROEN_AIRCROSS_MT_9740_5099_2026-03-18_{ts}"
+            (self.watch / f"{stem}_REPORT.pdf").write_bytes(f"pdf-{ts}".encode())
+            (self.watch / f"{stem}_TRACES.xlsm").write_bytes(f"xlsm-{ts}".encode())
+        self.watcher.scan_once()
+        self.assertEqual(len(self.db.list_tests()), 2)
+        self.assertEqual(parser.call_count, 2)
+
+    @patch("app.watcher.parse_pair", return_value=parsed_test())
+    @patch("app.watcher.sha256", side_effect=lambda p: hashlib.sha256(p.read_bytes()).hexdigest())
+    def test_unchanged_files_are_not_rehashed(self, sha, parser):
+        self.pdf.write_bytes(b"pdf-v1")
+        self.xlsm.write_bytes(b"xlsm-v1")
+        self.watcher.scan_once()
+        hashed_after_first = sha.call_count  # pdf + xlsm hashed once
+        self.watcher.scan_once()  # nothing changed
+        self.assertEqual(sha.call_count, hashed_after_first)
+
+    @patch("app.watcher.parse_pair", return_value=parsed_test())
+    def test_deleted_test_is_not_resurrected(self, parser):
+        self.pdf.write_bytes(b"pdf-v1")
+        self.xlsm.write_bytes(b"xlsm-v1")
+        self.watcher.scan_once()
+        test_id = self.db.list_jobs()[0]["test_id"]
+        self.assertTrue(self.db.delete_test(test_id))
+        self.assertEqual(len(self.db.list_tests()), 0)
+
+        self.watcher.scan_once()  # unchanged source must not bring it back
+        self.assertEqual(len(self.db.list_tests()), 0)
+        self.assertEqual(parser.call_count, 1)
+
+    @patch("app.watcher.parse_pair")
+    def test_unchanged_quarantined_not_reparsed_and_edits_survive(self, parser):
+        quarantined = parsed_test()
+        quarantined["lowConfidence"] = ["results"]  # a flag the watcher cannot auto-correct
+        parser.return_value = quarantined
+        self.pdf.write_bytes(b"pdf-v1")
+        self.xlsm.write_bytes(b"xlsm-v1")
+        self.watcher.scan_once()
+        self.assertEqual(self.db.list_tests()[0]["status"], "quarantined")
+        test_id = self.db.list_jobs()[0]["test_id"]
+
+        self.db.patch_test(test_id, {"vehicleModel": "EDITED MODEL"})
+        self.watcher.scan_once()  # unchanged source
+        self.assertEqual(parser.call_count, 1)  # not re-parsed
+        self.assertEqual(self.db.get_test(test_id)["vehicleModel"], "EDITED MODEL")  # edit preserved
 
 
 if __name__ == "__main__":

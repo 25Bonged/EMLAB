@@ -32,6 +32,18 @@ class FolderWatcher:
         self.db = db
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
+        # Serializes scans so the background loop and a manual /rescan request
+        # cannot run concurrently (double-hashing, duplicate parse subprocesses).
+        self.scan_lock = threading.Lock()
+
+    def _file_hash(self, path: Path) -> str:
+        """SHA-256 of a source file, reusing the stored digest when size and
+        mtime are unchanged — avoids re-reading every file on every scan."""
+        stat = path.stat()
+        meta = self.db.source_meta(str(path))
+        if meta and meta["size_bytes"] == stat.st_size and meta["modified_ns"] == stat.st_mtime_ns:
+            return meta["sha256"]
+        return sha256(path)
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -53,6 +65,11 @@ class FolderWatcher:
             self.stop_event.wait(self.settings.scan_interval_seconds)
 
     def scan_once(self) -> None:
+        # Lock so the background loop and a manual rescan never overlap.
+        with self.scan_lock:
+            self._scan_once()
+
+    def _scan_once(self) -> None:
         root = self.settings.watch_folder
         root.mkdir(parents=True, exist_ok=True)
         groups: dict[str, dict[str, Path]] = {}
@@ -65,15 +82,24 @@ class FolderWatcher:
                 continue
             groups.setdefault(stem_of(path), {})[kind] = path.resolve()
 
+        # Fetch jobs once, not once per stem (avoids O(N^2) over the whole folder).
+        jobs_by_stem = {job["stem"]: job for job in self.db.list_jobs()}
+
         for stem, pair in groups.items():
             pdf = pair.get("pdf")
             xlsm = pair.get("xlsm")
-            pdf_hash = sha256(pdf) if pdf else None
-            xlsm_hash = sha256(xlsm) if xlsm else None
-            if pdf:
-                self.db.register_source(stem, "pdf", pdf, pdf_hash or "")
-            if xlsm:
-                self.db.register_source(stem, "xlsm", xlsm, xlsm_hash or "")
+            try:
+                pdf_hash = self._file_hash(pdf) if pdf else None
+                xlsm_hash = self._file_hash(xlsm) if xlsm else None
+                if pdf:
+                    self.db.register_source(stem, "pdf", pdf, pdf_hash or "")
+                if xlsm:
+                    self.db.register_source(stem, "xlsm", xlsm, xlsm_hash or "")
+            except OSError as exc:
+                # A file vanished mid-scan (e.g. OneDrive sync churn) — skip this
+                # pair this cycle instead of aborting the entire scan.
+                print(f"watcher: source for {stem} unavailable, skipping: {exc}", flush=True)
+                continue
             if not pdf or not xlsm:
                 self.db.update_job(
                     stem, "pending_pair", pdf_path=str(pdf) if pdf else None, xlsm_path=str(xlsm) if xlsm else None,
@@ -82,8 +108,19 @@ class FolderWatcher:
                 )
                 continue
             combined_hash = hashlib.sha256(f"{pdf_hash}:{xlsm_hash}".encode()).hexdigest()
-            current = next((job for job in self.db.list_jobs() if job["stem"] == stem), None)
-            if current and current.get("status") == "accepted" and current.get("pdf_hash") == pdf_hash and current.get("xlsm_hash") == xlsm_hash:
+            current = jobs_by_stem.get(stem)
+            source_unchanged = bool(
+                current and current.get("pdf_hash") == pdf_hash and current.get("xlsm_hash") == xlsm_hash
+            )
+            # A test the engineer deleted stays deleted until its source changes;
+            # the watch folder must not silently resurrect it.
+            if current and current.get("status") == "deleted" and source_unchanged:
+                continue
+            # If the source is unchanged and we already hold a fully-parsed record
+            # (accepted or quarantined), do not re-run the parser. The parse is
+            # deterministic, so re-running wastes a subprocess per scan and — worse
+            # — would overwrite any manual edits made to a quarantined record.
+            if source_unchanged and current and current.get("status") in ("accepted", "quarantined"):
                 existing_test = self.db.get_test(current.get("test_id")) if current.get("test_id") else None
                 if existing_test and existing_test.get("units", {}).get("trace"):
                     continue
