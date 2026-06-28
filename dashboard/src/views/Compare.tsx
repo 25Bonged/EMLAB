@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
@@ -7,7 +7,7 @@ import { useNav } from '../store/useNav'
 import { Panel, Eyebrow, RagDot, Chip } from '../components/common'
 import { ALL_POLL, LIMITED, compliance } from '../lib/derive'
 import { TARGET, displayUnit, fmt, RAG_COLOR } from '../model/limits'
-import type { Pollutant, Test } from '../model/types'
+import type { Pollutant, Test, TracePoint } from '../model/types'
 import { useUnits } from '../store/useUnits'
 
 export function Compare() {
@@ -119,19 +119,47 @@ function TestPicker({
   )
 }
 
+// Continuous trace channels that can be plotted over the cycle. PM/PN mass is
+// gravimetric (no second-by-second trace), so it is intentionally excluded.
+const TRACE_CHANNELS: { key: keyof TracePoint; label: string }[] = [
+  { key: 'NOx', label: 'NOx' },
+  { key: 'CO', label: 'CO' },
+  { key: 'CO2', label: 'CO₂' },
+  { key: 'THC', label: 'THC' },
+  { key: 'CH4', label: 'CH₄' },
+  { key: 'NMHC', label: 'NMHC' },
+  { key: 'O2', label: 'O₂' },
+  { key: 'PN', label: 'PN' },
+]
+
 function TraceCompare({ A, B }: { A: Test; B: Test }) {
-  const series = 'NOx' as const
+  const [series, setSeries] = useState<keyof TracePoint>('NOx')
+
+  // Only offer channels that actually carry numeric data in at least one trace,
+  // so the selector never lands the user on an empty plot.
+  const channels = useMemo(() => {
+    const has = (key: keyof TracePoint) =>
+      A.trace?.dilute.some((d) => typeof d[key] === 'number') ||
+      B.trace?.dilute.some((d) => typeof d[key] === 'number')
+    return TRACE_CHANNELS.filter((c) => has(c.key))
+  }, [A, B])
+
+  // Keep the selection valid as the test pair (and thus available channels) changes.
+  const active: keyof TracePoint = channels.some((c) => c.key === series) ? series : channels[0]?.key ?? series
+  const unit = A.units?.trace?.dilute?.[active] ?? B.units?.trace?.dilute?.[active] ?? ''
+  const label = channels.find((c) => c.key === active)?.label ?? String(active)
+
   const data = useMemo(() => {
     if (!A.trace || !B.trace) return null
     const map = new Map<number, { t: number; A?: number; B?: number; spd?: number }>()
-    for (const d of A.trace.dilute) map.set(d.t, { t: d.t, A: d[series], spd: d.speed })
+    for (const d of A.trace.dilute) map.set(d.t, { t: d.t, A: d[active], spd: d.speed })
     for (const d of B.trace.dilute) {
       const e = map.get(d.t) ?? { t: d.t }
-      e.B = d[series]
+      e.B = d[active]
       map.set(d.t, e)
     }
     return [...map.values()].sort((x, y) => x.t - y.t)
-  }, [A, B])
+  }, [A, B, active])
 
   if (!data) return (
     <Panel><div style={{ padding: 28, textAlign: 'center', color: 'var(--ink-faint)', fontSize: 13 }}>
@@ -141,8 +169,36 @@ function TraceCompare({ A, B }: { A: Test; B: Test }) {
 
   return (
     <Panel ticks={false}>
-      <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--line)' }}>
-        <Eyebrow>Dilute {series} concentration over cycle · A vs B</Eyebrow>
+      <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <Eyebrow>Dilute {label} concentration over cycle · A vs B{unit ? ` · ${unit}` : ''}</Eyebrow>
+        {channels.length > 1 && (
+          <div role="tablist" aria-label="Trace channel" style={{ marginLeft: 'auto', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {channels.map((c) => {
+              const on = c.key === active
+              return (
+                <button
+                  key={c.key}
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => setSeries(c.key)}
+                  className="font-mono"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '4px 10px',
+                    borderRadius: 90,
+                    cursor: 'pointer',
+                    color: on ? 'var(--aubergine)' : 'var(--ink-dim)',
+                    border: `1px solid ${on ? 'rgba(74,21,75,0.32)' : 'var(--line-bright)'}`,
+                    background: on ? 'var(--aubergine-wash)' : '#faf8fb',
+                  }}
+                >
+                  {c.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
       <div style={{ height: 240, padding: 14 }}>
         <ResponsiveContainer width="100%" height="100%">
