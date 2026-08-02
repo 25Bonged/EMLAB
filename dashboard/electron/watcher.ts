@@ -114,8 +114,8 @@ export class FolderWatcher {
 
     for (const [stem, pair] of groups) {
       const { pdf, xlsm } = pair
-      let pdfHash: string | null = null
-      let xlsmHash: string | null = null
+      let pdfHash: string | null
+      let xlsmHash: string | null
       try {
         pdfHash = pdf ? this.hashFile(pdf) : null
         xlsmHash = xlsm ? this.hashFile(xlsm) : null
