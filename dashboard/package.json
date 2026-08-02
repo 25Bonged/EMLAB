@@ -12,7 +12,9 @@
     "test": "vitest run",
     "serve": "node --experimental-strip-types electron/serve.ts",
     "build:preload": "esbuild electron-main/preload.ts --bundle --platform=node --external:electron --outfile=electron-main/preload.js",
-    "electron:dev": "npm run build:preload && cross-env EMLAB_DEV=1 electron --experimental-strip-types electron-main/index.ts"
+    "build:preload:prod": "esbuild electron-main/preload.ts --bundle --platform=node --external:electron --outfile=build-electron/electron-main/preload.js",
+    "electron:dev": "npm run build:preload && cross-env EMLAB_DEV=1 electron --experimental-strip-types electron-main/index.ts",
+    "build:electron": "tsc -p tsconfig.build.json && npm run build:preload:prod"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
