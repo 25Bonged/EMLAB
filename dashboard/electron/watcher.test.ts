@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -30,7 +30,7 @@ describe('stemOf', () => {
 })
 
 describe('FolderWatcher', () => {
-  let dir: string, watch: string, db: Database, parse: ReturnType<typeof vi.fn>, watcher: FolderWatcher
+  let dir: string, watch: string, db: Database, parse: Mock, watcher: FolderWatcher
   let pdf: string, xlsm: string
 
   beforeEach(() => {
@@ -38,7 +38,7 @@ describe('FolderWatcher', () => {
     watch = path.join(dir, 'watch')
     mkdirSync(watch)
     db = new Database(path.join(dir, 'test.db'))
-    parse = vi.fn(async () => parsedTest())
+    parse = vi.fn(async (_pdfPath: string, _xlsmPath: string) => parsedTest())
     watcher = new FolderWatcher({ watchFolder: watch, scanIntervalSeconds: 1 }, db, parse)
     pdf = path.join(watch, 'FEV_SAMPLE_REPORT.pdf')
     xlsm = path.join(watch, 'FEV_SAMPLE_TRACES.xlsm')

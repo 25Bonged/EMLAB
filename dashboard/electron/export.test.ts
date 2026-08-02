@@ -13,7 +13,10 @@ describe('exportXlsx', () => {
       },
     ])
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(buffer)
+    // exceljs's bundled .d.ts predates Node 22's generic Buffer<T> and is not
+    // structurally compatible with it under a non-DOM tsconfig lib — both sides
+    // are real Buffers at runtime, this is a type-declaration mismatch only.
+    await wb.xlsx.load(buffer as any)
     const ws = wb.getWorksheet('Emission Compilation')!
     expect(ws.rowCount).toBe(2)
 
@@ -35,7 +38,7 @@ describe('exportXlsx', () => {
       { status: 'quarantined', results: {}, source: {}, lowConfidence: ['results'] },
     ])
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(buffer)
+    await wb.xlsx.load(buffer as any)
     const ws = wb.getWorksheet('Emission Compilation')!
     const headerValues = (ws.getRow(1).values as any[]).slice(1)
     const dataRow = (ws.getRow(2).values as any[]).slice(1)

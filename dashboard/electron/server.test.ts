@@ -37,19 +37,19 @@ describe('server', () => {
   it('reports health', async () => {
     const res = await app.request('/api/health')
     expect(res.status).toBe(200)
-    expect((await res.json()).ok).toBe(true)
+    expect(((await res.json()) as any).ok).toBe(true)
   })
 
   it('lists and fetches a test, 404ing for an unknown id', async () => {
     const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
 
-    const list = await (await app.request('/api/tests')).json()
+    const list = (await (await app.request('/api/tests')).json()) as any[]
     expect(list).toHaveLength(1)
     expect(list[0].trace).toBeNull()
 
     const detail = await app.request(`/api/tests/${id}`)
     expect(detail.status).toBe(200)
-    expect((await detail.json()).trace).toBeTruthy()
+    expect(((await detail.json()) as any).trace).toBeTruthy()
 
     expect((await app.request('/api/tests/missing')).status).toBe(404)
   })
@@ -61,7 +61,7 @@ describe('server', () => {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ vehicleModel: 'EDITED' }),
     })
-    expect((await patched.json()).vehicleModel).toBe('EDITED')
+    expect(((await patched.json()) as any).vehicleModel).toBe('EDITED')
 
     expect((await app.request(`/api/tests/${id}/approve`, { method: 'POST' })).status).toBe(200)
     expect(db.getTest(id)!.status).toBe('accepted')
@@ -79,7 +79,7 @@ describe('server', () => {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ tests: [sampleTest({ id: 'a' }), sampleTest({ id: 'b', vnNo: '1111', lowConfidence: ['results'] })] }),
     })
-    const body = await res.json()
+    const body = (await res.json()) as any
     expect(body.count).toBe(2)
     expect(db.listTests()).toHaveLength(2)
   })
@@ -101,7 +101,7 @@ describe('server', () => {
     writeFileSync(path.join(dir, 'watch', 'a_REPORT.pdf'), 'x')
     const res = await app.request('/api/ingestion/rescan', { method: 'POST' })
     expect(res.status).toBe(200)
-    const jobs = await (await app.request('/api/ingestion')).json()
+    const jobs = (await (await app.request('/api/ingestion')).json()) as any[]
     expect(jobs).toHaveLength(1)
     expect(jobs[0].status).toBe('pending_pair')
   })
