@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
 import { SCHEMA, POLLUTANT_UNITS } from './schema.ts'
+import { resultForTest } from '../src/lib/j2951ForTest.ts'
 
 const RUN_TS = /(\d{4}-\d{2}-\d{2})[ _T](\d{2}-\d{2}-\d{2})/
 
@@ -206,12 +207,18 @@ export class Database {
       'project', 'cycle', 'config', 'transmission', 'lab',
       'vehicleModel', 'vinSampleId', 'vnNo',
       'catalystState', 'stt', 'startSoc', 'lowConfidence',
+      'inertia', 'vehicleRld', 'overrides',
     ])
     const clean: Record<string, any> = {}
     for (const [key, value] of Object.entries(patch)) {
       if (allowed.has(key)) clean[key] = value
     }
     const updated = { ...current, ...clean }
+    // cycle, inertia and road load all feed the drive-trace indices; a stored
+    // result computed from superseded inputs would be silently wrong.
+    if (['cycle', 'inertia', 'vehicleRld', 'overrides'].some((k) => k in clean)) {
+      updated.j2951 = resultForTest(updated as never)
+    }
     const now = utcnow()
     this.tx(() => {
       this.db.prepare(
@@ -235,6 +242,17 @@ export class Database {
     return this.tx(() =>
       this.db.prepare('UPDATE tests SET status=?,updated_at=? WHERE id=?')
         .run(status, utcnow(), id).changes > 0,
+    )
+  }
+
+  /** Write a recomputed j2951 result without logging a manual override. */
+  setJ2951(id: string, j2951: Record<string, any>): boolean {
+    const current = this.getTest(id)
+    if (!current) return false
+    const updated = { ...current, j2951 }
+    return this.tx(() =>
+      this.db.prepare('UPDATE tests SET data_json=?,updated_at=? WHERE id=?')
+        .run(JSON.stringify(updated), utcnow(), id).changes > 0,
     )
   }
 

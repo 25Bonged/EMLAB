@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { identityKey, testId, Database } from './db.ts'
+import { CALC_VERSION } from '../src/lib/j2951.ts'
 
 const base = {
   vehicleModel: 'CITROEN AIRCROSS',
@@ -152,5 +153,47 @@ describe('Database', () => {
     expect(db.listJobs()[0].status).toBe('deleted')
     expect(db.getTest(id)).toBeNull()
     expect(db.deleteTest(id)).toBe(false)
+  })
+
+  it('persists a road-load override patch instead of dropping it', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const updated = db.patchTest(id, { overrides: { vehicleRld: { A: 100, B: 0.5, C: 0.04 } } })
+    expect(updated!.overrides).toEqual({ vehicleRld: { A: 100, B: 0.5, C: 0.04 } })
+    expect(db.getTest(id)!.overrides).toEqual({ vehicleRld: { A: 100, B: 0.5, C: 0.04 } })
+  })
+
+  it('persists an inertia patch', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const updated = db.patchTest(id, { inertia: 1500 })
+    expect(updated!.inertia).toBe(1500)
+    expect(db.getTest(id)!.inertia).toBe(1500)
+  })
+
+  it('recomputes j2951 when a drive-trace input is patched', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const updated = db.patchTest(id, { inertia: 1500 })
+    expect(updated!.j2951).toBeTruthy()
+    expect(updated!.j2951.calcVersion).toBe(CALC_VERSION)
+    expect(db.getTest(id)!.j2951.calcVersion).toBe(CALC_VERSION)
+  })
+
+  it('still drops fields outside the patch allow-list', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const updated = db.patchTest(id, { odo: 99999 } as any)
+    expect(updated!.odo).not.toBe(99999)
+    expect(db.getTest(id)!.odo).not.toBe(99999)
+  })
+
+  it('setJ2951 writes a recomputed result without logging a manual override', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const before = db.audit(id).filter((a) => a.kind === 'override').length
+    expect(db.setJ2951(id, { calcVersion: CALC_VERSION, indices: null, verdict: null, inputs: null })).toBe(true)
+    expect(db.getTest(id)!.j2951).toEqual({ calcVersion: CALC_VERSION, indices: null, verdict: null, inputs: null })
+    const after = db.audit(id).filter((a) => a.kind === 'override').length
+    expect(after).toBe(before)
+  })
+
+  it('setJ2951 on an unknown id returns false', () => {
+    expect(db.setJ2951('missing', { calcVersion: CALC_VERSION })).toBe(false)
   })
 })
