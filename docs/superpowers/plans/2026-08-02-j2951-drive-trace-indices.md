@@ -1879,8 +1879,15 @@ changing the aligner — the guard is doing its job.
 
 - [ ] **Step 5: Commit any fixes**
 
+Stage **only** the files you changed, by explicit path. Never use `git add -A` or
+`git add .` in this repo: the working tree carries unrelated in-progress Electron
+work (`dashboard/package.json`, `dashboard/src/components/Sidebar.tsx`,
+`dashboard/src/index.css`, `dashboard/build-electron/`,
+`dashboard/electron-main/preload.js`, `dashboard/tsconfig.build.json`) that must
+stay uncommitted.
+
 ```bash
-git add -A
+git add <only the files you touched>
 git commit -m "fix: address issues found in end-to-end verification"
 ```
 
