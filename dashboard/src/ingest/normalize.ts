@@ -96,10 +96,9 @@ export function buildTest(
     startSoc: null,
     rld: report?.rld ?? { A: null, B: null, C: null },
     // Vehicle A/B/C from the page-1 vehicle table — distinct from `rld`, which
-    // is the Dyno Set from the remarks line. Not parsed yet; J2951 reads only
-    // this field and degrades ER/EER to null while it is absent, rather than
-    // silently using the dyno values (wrong by ~2.5x on the F0 term).
-    vehicleRld: { A: null, B: null, C: null },
+    // is the Dyno Set from the remarks line. J2951 reads only this field; using
+    // the dyno values instead is wrong by ~2.5x on the F0 term.
+    vehicleRld: report?.vehicleRld ?? { A: null, B: null, C: null },
     fuel: { name: report?.meta.fuelName ?? null, consumptionL100: report?.meta.fuelL100 ?? null },
     conditions: {
       ambientC: report?.meta.ambientC ?? null,

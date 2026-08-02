@@ -55,4 +55,18 @@ describe.skipIf(!hasFixture)('parseReportItems (FEV template, ground truth = com
     expect(r.rld.C).toBeCloseTo(0.04692, 4)
     expect(r.lowConfidence).not.toContain('results')
   })
+
+  it('reads Vehicle A/B/C from the page-1 vehicle table, distinct from the dyno set', async () => {
+    const r = parseReportItems(await load(F1))
+    // J2951's road-load term needs these, NOT the Dyno Set values on page 4.
+    // Confusing the two makes ER/EER wrong by ~2.5x on the F0 term, which is
+    // exactly why this asserts both sets on the same report.
+    expect(r.vehicleRld.A).toBeCloseTo(122.2, 3)
+    expect(r.vehicleRld.B).toBeCloseTo(0.684, 4)
+    expect(r.vehicleRld.C).toBeCloseTo(0.0434, 5)
+
+    expect(r.vehicleRld.A).not.toBeCloseTo(r.rld.A!, 1)
+    expect(r.vehicleRld.B).not.toBeCloseTo(r.rld.B!, 2)
+    expect(r.lowConfidence).not.toContain('vehicleRld')
+  })
 })
