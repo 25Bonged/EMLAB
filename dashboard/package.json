@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "serve": "node --experimental-strip-types electron/serve.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
