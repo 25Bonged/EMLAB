@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "serve": "node --experimental-strip-types electron/serve.ts",
-    "electron:dev": "cross-env EMLAB_DEV=1 electron --experimental-strip-types electron-main/index.ts"
+    "build:preload": "esbuild electron-main/preload.ts --bundle --platform=node --external:electron --outfile=electron-main/preload.js",
+    "electron:dev": "npm run build:preload && cross-env EMLAB_DEV=1 electron --experimental-strip-types electron-main/index.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
@@ -36,6 +37,7 @@
     "cross-env": "^10.1.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
