@@ -91,4 +91,17 @@ describe('Database', () => {
     expect(got?.vehicleModel).toBe('CITROEN AIRCROSS')
     expect(db.getTest('missing')).toBeNull()
   })
+
+  it('preserves first_seen_at across job updates and clears unset fields', () => {
+    db.updateJob('stem-1', 'pending_pair', { pdf_path: '/a.pdf', message: 'waiting' })
+    const first = db.listJobs()[0]
+    expect(first.status).toBe('pending_pair')
+    expect(first.pdf_path).toBe('/a.pdf')
+
+    db.updateJob('stem-1', 'accepted', { pdf_path: '/a.pdf', xlsm_path: '/a.xlsm' })
+    const second = db.listJobs()[0]
+    expect(second.status).toBe('accepted')
+    expect(second.first_seen_at).toBe(first.first_seen_at)
+    expect(second.message).toBeNull()
+  })
 })

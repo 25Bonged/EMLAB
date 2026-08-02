@@ -146,6 +146,33 @@ export class Database {
     return row ? { ...JSON.parse(row.data_json), status: row.status } : null
   }
 
+  updateJob(stem: string, status: string, fields: Record<string, any> = {}): void {
+    const now = utcnow()
+    this.tx(() => {
+      const previous = this.db.prepare('SELECT first_seen_at FROM ingestion_jobs WHERE stem=?')
+        .get(stem) as { first_seen_at: string } | undefined
+      const v = {
+        pdf_path: null, xlsm_path: null, pdf_hash: null, xlsm_hash: null,
+        message: null, test_id: null, ...fields,
+      }
+      this.db.prepare(`
+        INSERT INTO ingestion_jobs(stem,status,pdf_path,xlsm_path,pdf_hash,xlsm_hash,message,first_seen_at,updated_at,test_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(stem) DO UPDATE SET status=excluded.status,pdf_path=excluded.pdf_path,
+          xlsm_path=excluded.xlsm_path,pdf_hash=excluded.pdf_hash,xlsm_hash=excluded.xlsm_hash,
+          message=excluded.message,updated_at=excluded.updated_at,test_id=excluded.test_id
+      `).run(
+        stem, status, v.pdf_path, v.xlsm_path, v.pdf_hash, v.xlsm_hash, v.message,
+        previous ? previous.first_seen_at : now, now, v.test_id,
+      )
+    })
+  }
+
+  listJobs(): Record<string, any>[] {
+    return (this.db.prepare('SELECT * FROM ingestion_jobs ORDER BY updated_at DESC')
+      .all() as Record<string, any>[]).map((row) => ({ ...row }))
+  }
+
   audit(id: string): Record<string, any>[] {
     const replacements = (this.db.prepare(
       'SELECT * FROM replacement_audit WHERE test_id=? ORDER BY replaced_at DESC',
