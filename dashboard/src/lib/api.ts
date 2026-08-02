@@ -1,6 +1,10 @@
 import type { Test } from '../model/types'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+let apiBaseOverride: string | null = null
+if (typeof window !== 'undefined' && window.emlab) {
+  apiBaseOverride = await window.emlab.apiBase()
+}
+const API_BASE = apiBaseOverride ?? import.meta.env.VITE_API_BASE ?? '/api'
 
 export interface Health {
   ok: boolean
