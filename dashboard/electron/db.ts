@@ -199,6 +199,53 @@ export class Database {
     return row ? row.path : null
   }
 
+  patchTest(id: string, patch: Record<string, any>): Record<string, any> | null {
+    const current = this.getTest(id)
+    if (!current) return null
+    const allowed = new Set([
+      'project', 'cycle', 'config', 'transmission', 'lab',
+      'vehicleModel', 'vinSampleId', 'vnNo',
+      'catalystState', 'stt', 'startSoc', 'lowConfidence',
+    ])
+    const clean: Record<string, any> = {}
+    for (const [key, value] of Object.entries(patch)) {
+      if (allowed.has(key)) clean[key] = value
+    }
+    const updated = { ...current, ...clean }
+    const now = utcnow()
+    this.tx(() => {
+      this.db.prepare(
+        'UPDATE tests SET project=?,cycle=?,config=?,transmission=?,lab=?,' +
+        'vehicle_model=?,vn_no=?,vin_sample_id=?,catalyst_state=?,' +
+        'data_json=?,low_confidence_json=?,updated_at=? WHERE id=?',
+      ).run(
+        updated.project ?? null, updated.cycle ?? null, updated.config ?? null,
+        updated.transmission ?? null, updated.lab ?? null, updated.vehicleModel ?? null,
+        updated.vnNo ?? null, updated.vinSampleId ?? null, updated.catalystState ?? null,
+        JSON.stringify(updated), JSON.stringify(updated.lowConfidence ?? []), now, id,
+      )
+      this.db.prepare(
+        'INSERT INTO manual_overrides(test_id,patch_json,changed_at,changed_by) VALUES(?,?,?,?)',
+      ).run(id, JSON.stringify(clean), now, 'local-pc')
+    })
+    return updated
+  }
+
+  setStatus(id: string, status: string): boolean {
+    return this.tx(() =>
+      this.db.prepare('UPDATE tests SET status=?,updated_at=? WHERE id=?')
+        .run(status, utcnow(), id).changes > 0,
+    )
+  }
+
+  deleteTest(id: string): boolean {
+    return this.tx(() => {
+      this.db.prepare("UPDATE ingestion_jobs SET status='deleted', updated_at=? WHERE test_id=?")
+        .run(utcnow(), id)
+      return this.db.prepare('DELETE FROM tests WHERE id=?').run(id).changes > 0
+    })
+  }
+
   audit(id: string): Record<string, any>[] {
     const replacements = (this.db.prepare(
       'SELECT * FROM replacement_audit WHERE test_id=? ORDER BY replaced_at DESC',

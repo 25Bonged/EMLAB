@@ -128,4 +128,29 @@ describe('Database', () => {
     expect(db.sourcePath(id, 'pdf')).toBe(file)
     expect(db.sourcePath(id, 'xlsm')).toBeNull()
   })
+
+  it('applies only allowlisted patch fields and records an override', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const updated = db.patchTest(id, { vehicleModel: 'EDITED', results: { CO: 999 } } as any)
+    expect(updated!.vehicleModel).toBe('EDITED')
+    expect(updated!.results.CO).toBe(10)
+    expect(db.audit(id).filter((a) => a.kind === 'override')).toHaveLength(1)
+    expect(db.patchTest('missing', {})).toBeNull()
+  })
+
+  it('sets status and reports whether a row matched', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'quarantined', 'ok')
+    expect(db.setStatus(id, 'accepted')).toBe(true)
+    expect(db.getTest(id)!.status).toBe('accepted')
+    expect(db.setStatus('missing', 'accepted')).toBe(false)
+  })
+
+  it('tombstones the ingestion job when deleting a test', () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    db.updateJob('stem', 'accepted', { test_id: id })
+    expect(db.deleteTest(id)).toBe(true)
+    expect(db.listJobs()[0].status).toBe('deleted')
+    expect(db.getTest(id)).toBeNull()
+    expect(db.deleteTest(id)).toBe(false)
+  })
 })
