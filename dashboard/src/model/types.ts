@@ -69,12 +69,17 @@ export interface Test {
   odo?: number | null
   distanceKm?: number | null
   phaseCount?: number | null
+  /** Dyno Set A/B/C from the report remarks line — the dyno's own setting. */
   rld: { A: number | null; B: number | null; C: number | null }
+  /** Vehicle A/B/C from the page-1 vehicle table — the coefficients J2951 needs.
+   *  Distinct from `rld`; do not substitute one for the other. */
+  vehicleRld: { A: number | null; B: number | null; C: number | null }
   fuel: { name?: string | null; consumptionL100?: number | null; economyKmL?: number | null }
   conditions: { ambientC?: number | null; humidity?: number | null; cellPressure?: number | null }
   results: Record<Pollutant, number | null> // complete-cycle Specific [mg/km] (PN = #/km)
   phases: PhaseResult[]
   trace?: TraceRecord
+  j2951?: J2951Result | null
   units?: UnitMetadata
   source: { pdf?: string; xlsm?: string; xlsx?: string; sheet?: string; row?: number }
   /** fields the parser could not read with confidence */
@@ -87,3 +92,46 @@ export interface Test {
 
 export type RagLevel = 'pass' | 'warn' | 'fail' | 'na'
 export type IngestionStatus = 'pending_pair' | 'processing' | 'quarantined' | 'accepted' | 'replaced'
+
+/* ---------------------------- SAE J2951 drive trace ---------------------------- */
+
+export interface J2951Indices {
+  iwr: number // %
+  rmsse: number // km/h
+  dr: number
+  er: number | null // null when vehicle road load is unavailable
+  eer: number | null
+  ascr: number
+  distTargetKm: number
+  distActualKm: number
+  iwTargetJkg: number
+  iwActualJkg: number
+}
+
+export interface J2951Inputs {
+  massKg: number
+  f0: number
+  f1: number
+  f2: number
+  kr: number
+  source: 'parsed' | 'override'
+}
+
+export type J2951Unavailable = 'no_trace' | 'no_schedule' | 'sample_rate' | 'length_mismatch'
+
+export interface J2951Verdict {
+  iwr: RagLevel
+  rmsse: RagLevel
+  overall: RagLevel
+}
+
+export interface J2951Result {
+  calcVersion: number
+  scheduleId: string | null
+  sampleRateHz: number | null
+  indices: J2951Indices | null
+  verdict: J2951Verdict | null
+  inputs: J2951Inputs | null
+  unavailable?: J2951Unavailable
+  detail?: string
+}
