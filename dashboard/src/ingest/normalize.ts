@@ -1,5 +1,6 @@
 import type { Test, TraceRecord } from '../model/types'
 import type { ParsedReport } from './pdfReport'
+import { resultForTest } from '../lib/j2951ForTest'
 
 export interface FilenameMeta {
   stem: string
@@ -77,7 +78,7 @@ export function buildTest(
   if (config === 'Unknown') low.push('config')
   const transmission = classifyTransmission(report?.meta.transmissionRaw ?? null, fn.transmissionToken)
 
-  return {
+  const test: Test = {
     id: stem,
     project: proj.project,
     cycle: cyc.cycle,
@@ -120,4 +121,6 @@ export function buildTest(
     lowConfidence: [...new Set(low)],
     importedAt,
   }
+  test.j2951 = resultForTest(test)
+  return test
 }
