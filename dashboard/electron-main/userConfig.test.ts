@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { loadOrPromptWatchFolder } from './userConfig.ts'
@@ -33,5 +33,15 @@ describe('loadOrPromptWatchFolder', () => {
     const folder = await loadOrPromptWatchFolder(dir, pick)
     expect(folder).toBeNull()
     expect(existsSync(path.join(dir, 'config.json'))).toBe(false)
+  })
+
+  it('re-prompts instead of crashing when config.json is corrupt', async () => {
+    writeFileSync(path.join(dir, 'config.json'), '{ not valid json')
+    const picked = path.join(dir, 'OneDrive-Reports')
+    const pick = async () => picked
+    const folder = await loadOrPromptWatchFolder(dir, pick)
+    expect(folder).toBe(picked)
+    const saved = JSON.parse(readFileSync(path.join(dir, 'config.json'), 'utf-8'))
+    expect(saved.watch_folder).toBe(picked)
   })
 })

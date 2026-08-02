@@ -79,7 +79,15 @@ function createWindow(): void {
 
 ipcMain.handle('emlab:api-base', () => resolvedApiBase)
 
-app.whenReady().then(start)
+app.whenReady().then(start).catch((error) => {
+  // Without this, a rejection anywhere in start() (a corrupt config file, a
+  // dialog error, a port the OS refuses to hand out) becomes an unhandled
+  // rejection: no window, no error dialog, no quit -- the app just sits
+  // there looking hung, and a non-technical user has no way to tell why.
+  console.error('EMLAB failed to start:', error)
+  dialog.showErrorBox('EMLAB failed to start', String(error?.message ?? error))
+  app.quit()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
