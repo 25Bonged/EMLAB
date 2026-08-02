@@ -41,3 +41,6 @@ Thumbs.db
 
 # root node_modules is a symlink into a runtime cache — never track it
 /node_modules
+
+# ── Isolated worktrees for parallel/background agent work ──
+.worktrees/
