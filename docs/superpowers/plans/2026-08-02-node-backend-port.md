@@ -1046,12 +1046,15 @@ describe('FolderWatcher', () => {
   it('does not re-hash unchanged files', async () => {
     writeFileSync(pdf, 'pdf-v1')
     writeFileSync(xlsm, 'xlsm-v1')
-    const spy = vi.spyOn(watcher, 'hashFile')
+    // Spy on computeHash (the expensive disk read), not hashFile (the cache
+    // wrapper, which is always called once per file per scan regardless of
+    // whether it hits the cache). Spying on the wrapper would pass even if
+    // caching were completely broken.
+    const spy = vi.spyOn(watcher, 'computeHash')
     await watcher.scanOnce()
-    const afterFirst = spy.mock.results.length
-    await watcher.scanOnce()
-    expect(spy.mock.results.length).toBe(afterFirst + 2)
-    expect(spy.mock.results.slice(afterFirst).every((r) => r.type === 'return')).toBe(true)
+    expect(spy).toHaveBeenCalledTimes(2) // pdf + xlsm hashed once each
+    await watcher.scanOnce() // nothing changed
+    expect(spy).toHaveBeenCalledTimes(2) // still 2 — the second scan hit the cache for both
     expect(parse).toHaveBeenCalledTimes(1)
   })
 
@@ -1143,6 +1146,13 @@ export class FolderWatcher {
     this.scanning = false
   }
 
+  /** The expensive disk read, factored out so tests can spy on it directly
+   * rather than on hashFile (which runs once per file every scan regardless
+   * of whether it hits the cache below). */
+  computeHash(filePath: string): string {
+    return sha256File(filePath)
+  }
+
   /** Reuses the stored digest when size and mtime are unchanged. */
   hashFile(filePath: string): string {
     const stat = fs.statSync(filePath, { bigint: true })
@@ -1150,7 +1160,7 @@ export class FolderWatcher {
     if (meta && meta.size_bytes === Number(stat.size) && meta.modified_ns === String(stat.mtimeNs)) {
       return meta.sha256
     }
-    return sha256File(filePath)
+    return this.computeHash(filePath)
   }
 
   start(): void {
@@ -1864,6 +1874,7 @@ This is the handoff point to **plan 2** (Electron shell — main/preload, first-
 ## Self-review notes
 
 - **Spec coverage:** `db.py` → Tasks 3–7. `watcher.py` → Task 9. `parser.py` deletion → Task 8. `export.py` → Task 10. `main.py` routes → Task 11. Python removal → Task 13. Transactions hazard → Task 4. mtime hazard → Task 6. Timestamp format hazard → `utcnow()` in Task 3, one format throughout. Auth-layer deletion (spec's data-model decision) → explicitly called out in Task 11, `require_local`/`is_local`/Basic-auth are not ported.
-- **Naming consistency checked:** `testId` (function) vs `saveTest().testId` (field) are distinct on purpose; `hashFile` is the spied method in Task 9 and the definition in Task 9 Step 3; `sourceMeta` returns `modified_ns` as `string` in both Task 6 and its consumer in Task 9; `createServer(db, watcher, settings)` signature in Task 11 matches its two call sites (Task 11's tests, Task 12's `serve.ts`).
+- **Naming consistency checked:** `testId` (function) vs `saveTest().testId` (field) are distinct on purpose; `computeHash` is the spied method in Task 9's test and matches the method `hashFile` delegates to in Task 9's implementation; `sourceMeta` returns `modified_ns` as `string` in both Task 6 and its consumer in Task 9; `createServer(db, watcher, settings)` signature in Task 11 matches its two call sites (Task 11's tests, Task 12's `serve.ts`).
 - **Deviation from the Python:** `Settings` drops `host`, `auth_user`, `auth_password` per the spec's deletion of the auth layer. `Database` takes a path string rather than a `Settings` object, since it only ever used `database_path`. The Hono static-file and raw-`Response` behavior in Task 11 was verified with a live smoke test against `@hono/node-server@2.0.12` before this task was written, not assumed from documentation.
 - **Placeholder scan:** no TBD/TODO markers; every step has literal code, not a description of code.
+- **Test-design bug caught and fixed before dispatch:** Task 9's "does not re-hash unchanged files" test originally spied on `hashFile` (the cache wrapper), which runs once per file on every scan regardless of whether the cache hits — that test would have passed even with caching completely broken. Fixed by factoring the expensive read into a separate `computeHash` method and spying on that instead, asserting its call count stays flat across the second scan.
