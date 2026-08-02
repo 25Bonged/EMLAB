@@ -11,6 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.12",
+    "exceljs": "^4.4.0",
+    "hono": "^4.12.33",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^6.0.227",
     "react": "^19.2.6",
@@ -27,6 +30,8 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/ui": "^4.1.9",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
