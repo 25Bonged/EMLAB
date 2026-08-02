@@ -7,7 +7,7 @@ import {
 const base = (over: Partial<Test>): Test => ({
   id: 'x', project: 'STLA', cycle: 'WLTP', config: 'CC24', transmission: 'AT6', lab: 'FEV',
   vehicleModel: 'M', vinSampleId: '', vnNo: '1', date: '2026-01-01',
-  rld: { A: null, B: null, C: null }, fuel: {}, conditions: {},
+  rld: { A: null, B: null, C: null }, vehicleRld: { A: null, B: null, C: null }, fuel: {}, conditions: {},
   results: { CO: null, THC: null, NOx: null, CO2: null, CH4: null, NMHC: null, PM: null, PN: null },
   phases: [], source: {}, lowConfidence: [], importedAt: '', ...over,
 })
