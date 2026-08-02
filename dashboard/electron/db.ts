@@ -173,6 +173,32 @@ export class Database {
       .all() as Record<string, any>[]).map((row) => ({ ...row }))
   }
 
+  registerSource(stem: string, kind: string, filePath: string, sha256: string, testIdValue: string | null = null): void {
+    const stat = fs.statSync(filePath, { bigint: true })
+    const now = utcnow()
+    this.tx(() => {
+      this.db.prepare(`
+        INSERT INTO source_files(test_id,stem,kind,path,sha256,size_bytes,modified_ns,first_seen_at,last_seen_at)
+        VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(path) DO UPDATE SET test_id=excluded.test_id,sha256=excluded.sha256,
+          size_bytes=excluded.size_bytes,modified_ns=excluded.modified_ns,last_seen_at=excluded.last_seen_at
+      `).run(testIdValue, stem, kind, filePath, sha256, Number(stat.size), String(stat.mtimeNs), now, now)
+    })
+  }
+
+  sourceMeta(filePath: string): { sha256: string; size_bytes: number; modified_ns: string } | null {
+    const row = this.db.prepare('SELECT sha256, size_bytes, modified_ns FROM source_files WHERE path=?')
+      .get(filePath) as { sha256: string; size_bytes: number; modified_ns: string } | undefined
+    return row ? { ...row } : null
+  }
+
+  sourcePath(testIdValue: string, kind: string): string | null {
+    const row = this.db.prepare(
+      'SELECT path FROM source_files WHERE test_id=? AND kind=? ORDER BY last_seen_at DESC LIMIT 1',
+    ).get(testIdValue, kind) as { path: string } | undefined
+    return row ? row.path : null
+  }
+
   audit(id: string): Record<string, any>[] {
     const replacements = (this.db.prepare(
       'SELECT * FROM replacement_audit WHERE test_id=? ORDER BY replaced_at DESC',

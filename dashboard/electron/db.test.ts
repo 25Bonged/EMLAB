@@ -104,4 +104,28 @@ describe('Database', () => {
     expect(second.first_seen_at).toBe(first.first_seen_at)
     expect(second.message).toBeNull()
   })
+
+  it('stores nanosecond mtimes losslessly and reads them back', () => {
+    const file = path.join(dir, 'sample.pdf')
+    require('node:fs').writeFileSync(file, 'x')
+    db.registerSource('stem-1', 'pdf', file, 'deadbeef')
+
+    const meta = db.sourceMeta(file)
+    expect(meta).not.toBeNull()
+    expect(meta!.sha256).toBe('deadbeef')
+
+    const stat = require('node:fs').statSync(file, { bigint: true })
+    expect(meta!.modified_ns).toBe(String(stat.mtimeNs))
+    expect(meta!.size_bytes).toBe(1)
+    expect(db.sourceMeta('/nope')).toBeNull()
+  })
+
+  it('returns the most recent source path for a kind', () => {
+    const file = path.join(dir, 'a.pdf')
+    require('node:fs').writeFileSync(file, 'x')
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    db.registerSource('stem', 'pdf', file, 'hash', id)
+    expect(db.sourcePath(id, 'pdf')).toBe(file)
+    expect(db.sourcePath(id, 'xlsm')).toBeNull()
+  })
 })
