@@ -1309,14 +1309,561 @@ git commit -m "feat: port folder watcher with injected parser"
 
 ---
 
-## Remaining tasks
+### Task 10: XLSX export
 
-Tasks 10–13 (xlsx export, the Hono server, the plain-node entry point, and deleting the Python backend) follow the same TDD shape. They are appended in a follow-up pass to keep this document reviewable — the nine tasks above are self-contained and end with `db.py` and `watcher.py` fully ported and green.
+Port of `backend/app/export.py`. `POLLUTANTS` already exists in `electron/schema.ts` (Task 2).
+
+**Files:**
+- Create: `dashboard/electron/export.ts`
+- Create: `dashboard/electron/export.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `dashboard/electron/export.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import ExcelJS from 'exceljs'
+import { exportXlsx } from './export.ts'
+
+describe('exportXlsx', () => {
+  it('writes one header row plus one row per test with derived g/km columns', async () => {
+    const buffer = await exportXlsx([
+      {
+        status: 'accepted', date: '2026-03-18', project: 'STLA', cycle: 'WLTP',
+        vehicleModel: 'CITROEN AIRCROSS', vnNo: '9740',
+        results: { CO: 325.3, THC: 7.59, NOx: 24.73, CO2: 134752, CH4: 2.68, NMHC: 4.42, PM: 1.32, PN: 3.38e9 },
+        units: { resultsSource: 'mg/km' }, source: { pdf: 'a.pdf', xlsm: 'a.xlsm' }, lowConfidence: [],
+      },
+    ])
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(buffer)
+    const ws = wb.getWorksheet('Emission Compilation')!
+    expect(ws.rowCount).toBe(2)
+
+    const headerValues = (ws.getRow(1).values as any[]).slice(1)
+    expect(headerValues[0]).toBe('Status')
+    expect(headerValues).toContain('CO (mg/km)')
+    expect(headerValues).toContain('CO (g/km)')
+    expect(headerValues).toContain('PN (#/km)')
+    expect(headerValues).not.toContain('PN (g/km)')
+
+    const dataRow = (ws.getRow(2).values as any[]).slice(1)
+    expect(dataRow[headerValues.indexOf('CO (mg/km)')]).toBeCloseTo(325.3)
+    expect(dataRow[headerValues.indexOf('CO (g/km)')]).toBeCloseTo(0.3253)
+    expect(dataRow[headerValues.indexOf('PN (#/km)')]).toBeCloseTo(3.38e9)
+  })
+
+  it('leaves missing pollutant values as blank rather than throwing', async () => {
+    const buffer = await exportXlsx([
+      { status: 'quarantined', results: {}, source: {}, lowConfidence: ['results'] },
+    ])
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(buffer)
+    const ws = wb.getWorksheet('Emission Compilation')!
+    const headerValues = (ws.getRow(1).values as any[]).slice(1)
+    const dataRow = (ws.getRow(2).values as any[]).slice(1)
+    expect(dataRow[headerValues.indexOf('CO (mg/km)')]).toBeNull()
+    expect(dataRow[headerValues.indexOf('Review Flags')]).toBe('results')
+  })
+})
+```
+
+- [ ] **Step 2: Run to confirm it fails**
+
+Run: `cd dashboard && npx vitest run electron/export.test.ts`
+Expected: FAIL — cannot resolve `./export.ts`.
+
+- [ ] **Step 3: Create `dashboard/electron/export.ts`**
+
+```ts
+import ExcelJS from 'exceljs'
+import { POLLUTANTS } from './schema.ts'
+
+export async function exportXlsx(tests: Record<string, any>[]): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('Emission Compilation')
+
+  const headers = [
+    'Status', 'Test Date', 'Program', 'Cycle', 'Configuration', 'Transmission', 'Lab',
+    'Vehicle', 'VN No.', 'Catalyst', 'STT', 'Start SOC (%)', 'ODO (km)', 'Inertia (kg)',
+    ...POLLUTANTS.flatMap((pollutant) =>
+      pollutant === 'PN' ? [`${pollutant} (#/km)`] : [`${pollutant} (mg/km)`, `${pollutant} (g/km)`],
+    ),
+    'Source Result Unit', 'PDF Source', 'XLSM Source', 'Review Flags',
+  ]
+  ws.addRow(headers)
+
+  for (const test of tests) {
+    const results = test.results ?? {}
+    const source = test.source ?? {}
+    const emissionValues: (number | null)[] = []
+    for (const pollutant of POLLUTANTS) {
+      const value = results[pollutant] ?? null
+      if (pollutant === 'PN') {
+        emissionValues.push(value)
+      } else {
+        emissionValues.push(value, value != null ? value / 1000 : null)
+      }
+    }
+    ws.addRow([
+      test.status ?? null, test.date ?? null, test.project ?? null, test.cycle ?? null, test.config ?? null,
+      test.transmission ?? null, test.lab ?? null, test.vehicleModel ?? null, test.vnNo ?? null,
+      test.catalystState ?? null, test.stt ?? null, test.startSoc ?? null, test.odo ?? null,
+      test.inertia ?? null, ...emissionValues, (test.units ?? {}).resultsSource ?? 'mg/km',
+      source.pdf ?? null, source.xlsm ?? null, (test.lowConfidence ?? []).join(', '),
+    ])
+  }
+
+  const headerRow = ws.getRow(1)
+  headerRow.eachCell((cell) => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF12313A' } }
+    cell.font = { color: { argb: 'FFFFFFFF' }, bold: true }
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+  })
+  headerRow.height = 34
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: headers.length } }
+
+  const wideHeaders = new Set(['Vehicle', 'Catalyst', 'PDF Source', 'XLSM Source', 'Review Flags'])
+  headers.forEach((header, index) => {
+    ws.getColumn(index + 1).width = wideHeaders.has(header) ? 30 : 16
+  })
+
+  return Buffer.from(await wb.xlsx.writeBuffer())
+}
+```
+
+- [ ] **Step 4: Run to confirm it passes**
+
+Run: `cd dashboard && npx vitest run electron/export.test.ts`
+Expected: PASS, 2 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add dashboard/electron/export.ts dashboard/electron/export.test.ts
+git commit -m "feat: port xlsx export to exceljs"
+```
+
+---
+
+### Task 11: Hono HTTP server
+
+Port of the 12 routes in `backend/app/main.py`, **minus** `is_local`/`require_local` and the Basic-auth middleware — every request is local per the spec's data-model decision. CORS is dropped from the production server entirely (only `vite dev` needs it, and that talks to the dev server via `vite.config.ts`'s proxy, not this server).
+
+The `@hono/node-server` static-file and raw-`Response` behavior below was verified with a live smoke test against v2.0.12 before writing this task — `serveStatic({ root })` serves `index.html` at `/`, and returning a raw `Response` with custom headers works for binary downloads (evidence files, the xlsx export).
+
+**Files:**
+- Create: `dashboard/electron/server.ts`
+- Create: `dashboard/electron/server.test.ts`
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `dashboard/electron/server.test.ts`:
+
+```ts
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { Database } from './db.ts'
+import { FolderWatcher } from './watcher.ts'
+import { createServer } from './server.ts'
+
+function sampleTest(overrides: Record<string, any> = {}) {
+  return {
+    id: 'sample', project: 'STLA', cycle: 'WLTP', vehicleModel: 'CITROEN AIRCROSS', vnNo: '9740',
+    date: '2026-03-18', results: { CO: 10, THC: 1, NOx: 2, CO2: 3, CH4: 4, NMHC: 5, PM: 0.1, PN: 1e9 },
+    phases: [] as any[], trace: { dilute: [{ t: 1, NOx: 2 }] }, source: {}, lowConfidence: [] as string[],
+    importedAt: '2026-06-20T00:00:00Z', ...overrides,
+  }
+}
+
+describe('server', () => {
+  let dir: string, db: Database, watcher: FolderWatcher, app: ReturnType<typeof createServer>
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'emlab-srv-'))
+    mkdirSync(path.join(dir, 'watch'))
+    db = new Database(path.join(dir, 'test.db'))
+    watcher = new FolderWatcher({ watchFolder: path.join(dir, 'watch'), scanIntervalSeconds: 1 }, db, async () => sampleTest())
+    app = createServer(db, watcher, {
+      watchFolder: path.join(dir, 'watch'), databasePath: path.join(dir, 'test.db'),
+      port: 0, scanIntervalSeconds: 1, dashboardDist: path.join(dir, 'nonexistent-dist'),
+    })
+  })
+  afterEach(() => {
+    watcher.stop()
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reports health', async () => {
+    const res = await app.request('/api/health')
+    expect(res.status).toBe(200)
+    expect((await res.json()).ok).toBe(true)
+  })
+
+  it('lists and fetches a test, 404ing for an unknown id', async () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+
+    const list = await (await app.request('/api/tests')).json()
+    expect(list).toHaveLength(1)
+    expect(list[0].trace).toBeNull()
+
+    const detail = await app.request(`/api/tests/${id}`)
+    expect(detail.status).toBe(200)
+    expect((await detail.json()).trace).toBeTruthy()
+
+    expect((await app.request('/api/tests/missing')).status).toBe(404)
+  })
+
+  it('patches, approves, quarantines, and deletes a test', async () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'quarantined', 'ok')
+
+    const patched = await app.request(`/api/tests/${id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vehicleModel: 'EDITED' }),
+    })
+    expect((await patched.json()).vehicleModel).toBe('EDITED')
+
+    expect((await app.request(`/api/tests/${id}/approve`, { method: 'POST' })).status).toBe(200)
+    expect(db.getTest(id)!.status).toBe('accepted')
+
+    expect((await app.request(`/api/tests/${id}/quarantine`, { method: 'POST' })).status).toBe(200)
+    expect(db.getTest(id)!.status).toBe('quarantined')
+
+    expect((await app.request(`/api/tests/${id}`, { method: 'DELETE' })).status).toBe(200)
+    expect(db.getTest(id)).toBeNull()
+    expect((await app.request(`/api/tests/${id}/approve`, { method: 'POST' })).status).toBe(404)
+  })
+
+  it('imports parsed tests from the browser', async () => {
+    const res = await app.request('/api/tests/import-parsed', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tests: [sampleTest({ id: 'a' }), sampleTest({ id: 'b', vnNo: '1111', lowConfidence: ['results'] })] }),
+    })
+    const body = await res.json()
+    expect(body.count).toBe(2)
+    expect(db.listTests()).toHaveLength(2)
+  })
+
+  it('serves evidence files with a content-disposition header, 404ing when absent', async () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const pdfPath = path.join(dir, 'watch', 'stem_REPORT.pdf')
+    writeFileSync(pdfPath, 'pdf-bytes')
+    db.registerSource('stem', 'pdf', pdfPath, 'hash', id)
+
+    const res = await app.request(`/api/tests/${id}/evidence/pdf`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-disposition')).toContain('stem_REPORT.pdf')
+    expect((await app.request(`/api/tests/${id}/evidence/xlsm`)).status).toBe(404)
+    expect((await app.request(`/api/tests/${id}/evidence/bogus`)).status).toBe(400)
+  })
+
+  it('lists ingestion jobs and triggers a rescan', async () => {
+    writeFileSync(path.join(dir, 'watch', 'a_REPORT.pdf'), 'x')
+    const res = await app.request('/api/ingestion/rescan', { method: 'POST' })
+    expect(res.status).toBe(200)
+    const jobs = await (await app.request('/api/ingestion')).json()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].status).toBe('pending_pair')
+  })
+
+  it('exports an xlsx workbook', async () => {
+    db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const res = await app.request('/api/export.xlsx')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('spreadsheetml')
+    const buf = Buffer.from(await res.arrayBuffer())
+    expect(buf.length).toBeGreaterThan(0)
+  })
+})
+```
+
+- [ ] **Step 2: Run to confirm they fail**
+
+Run: `cd dashboard && npx vitest run electron/server.test.ts`
+Expected: FAIL — cannot resolve `./server.ts`.
+
+- [ ] **Step 3: Create `dashboard/electron/server.ts`**
+
+```ts
+import { Hono } from 'hono'
+import { serveStatic } from '@hono/node-server/serve-static'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
+import type { Database } from './db.ts'
+import type { FolderWatcher } from './watcher.ts'
+import { exportXlsx } from './export.ts'
+import type { Settings } from './config.ts'
+
+function sortKeysDeep(value: any): any {
+  if (Array.isArray(value)) return value.map(sortKeysDeep)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeysDeep(value[key])]))
+  }
+  return value
+}
+
+export function createServer(db: Database, watcher: FolderWatcher, settings: Settings): Hono {
+  const app = new Hono()
+
+  app.get('/api/health', (c) =>
+    c.json({ ok: true, can_edit: true, watch_folder: settings.watchFolder, database: settings.databasePath }))
+
+  app.get('/api/tests', (c) => {
+    const includeNonaccepted = c.req.query('include_nonaccepted') !== 'false'
+    const summary = c.req.query('summary') !== 'false'
+    const rows = db.listTests(includeNonaccepted)
+    return c.json(summary ? rows.map((test) => ({ ...test, trace: null, phases: [] })) : rows)
+  })
+
+  app.get('/api/tests/:id', (c) => {
+    const test = db.getTest(c.req.param('id'))
+    return test ? c.json(test) : c.json({ detail: 'Test not found' }, 404)
+  })
+
+  app.patch('/api/tests/:id', async (c) => {
+    const patch = await c.req.json()
+    const test = db.patchTest(c.req.param('id'), patch)
+    return test ? c.json(test) : c.json({ detail: 'Test not found' }, 404)
+  })
+
+  app.post('/api/tests/import-parsed', async (c) => {
+    const payload = await c.req.json()
+    const tests: Record<string, any>[] = payload.tests ?? []
+    const imported: string[] = []
+    for (const test of tests) {
+      const stem = test.id ?? 'manual-import'
+      const digest = createHash('sha256').update(JSON.stringify(sortKeysDeep(test))).digest('hex')
+      const status = test.lowConfidence?.length ? 'quarantined' : 'accepted'
+      const { testId: id } = db.saveTest(test, stem, digest, status, 'manual browser import')
+      imported.push(id)
+    }
+    return c.json({ count: imported.length, ids: imported })
+  })
+
+  app.post('/api/tests/:id/approve', (c) =>
+    db.setStatus(c.req.param('id'), 'accepted') ? c.json({ ok: true }) : c.json({ detail: 'Test not found' }, 404))
+
+  app.post('/api/tests/:id/quarantine', (c) =>
+    db.setStatus(c.req.param('id'), 'quarantined') ? c.json({ ok: true }) : c.json({ detail: 'Test not found' }, 404))
+
+  app.delete('/api/tests/:id', (c) =>
+    db.deleteTest(c.req.param('id')) ? c.json({ ok: true }) : c.json({ detail: 'Test not found' }, 404))
+
+  app.get('/api/tests/:id/audit', (c) => c.json(db.audit(c.req.param('id'))))
+
+  app.get('/api/tests/:id/evidence/:kind', (c) => {
+    const kind = c.req.param('kind')
+    if (kind !== 'pdf' && kind !== 'xlsm') return c.json({ detail: 'Evidence kind must be pdf or xlsm' }, 400)
+    const filePath = db.sourcePath(c.req.param('id'), kind)
+    if (!filePath || !fs.existsSync(filePath)) return c.json({ detail: 'Evidence file not found' }, 404)
+    return new Response(new Uint8Array(fs.readFileSync(filePath)), {
+      headers: { 'Content-Disposition': `attachment; filename="${path.basename(filePath)}"` },
+    })
+  })
+
+  app.get('/api/ingestion', (c) => c.json(db.listJobs()))
+
+  app.post('/api/ingestion/rescan', async (c) => {
+    await watcher.scanOnce()
+    return c.json({ ok: true, jobs: db.listJobs() })
+  })
+
+  app.get('/api/export.xlsx', async (c) => {
+    const includeNonaccepted = c.req.query('include_nonaccepted') === 'true'
+    const buffer = await exportXlsx(db.listTests(includeNonaccepted))
+    return new Response(new Uint8Array(buffer), {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename=emission_compilation.xlsx',
+      },
+    })
+  })
+
+  if (fs.existsSync(settings.dashboardDist)) {
+    app.use('/*', serveStatic({ root: settings.dashboardDist }))
+    app.get('*', serveStatic({ path: path.join(settings.dashboardDist, 'index.html') }))
+  }
+
+  return app
+}
+```
+
+- [ ] **Step 4: Run to confirm they pass**
+
+Run: `cd dashboard && npx vitest run electron/server.test.ts`
+Expected: PASS, 7 tests. `main.py`'s route surface is now fully ported, minus the deleted auth layer.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add dashboard/electron/server.ts dashboard/electron/server.test.ts
+git commit -m "feat: port HTTP routes to Hono, dropping the local-only auth layer"
+```
+
+---
+
+### Task 12: Plain-node entry point
+
+Wires `Database`, `FolderWatcher`, and `createServer` together under plain `node` — no Electron yet. This is what `npm run serve` (added in Task 1) runs, and it's how this plan is verified end-to-end before Electron enters the picture in plan 2.
+
+**Files:**
+- Create: `dashboard/electron/serve.ts`
+
+No unit test — this is a thin composition root. It is verified manually in Step 3 and will be exercised again by plan 2's Electron main process, which calls the same pieces.
+
+- [ ] **Step 1: Create `dashboard/electron/serve.ts`**
+
+```ts
+import { serve } from '@hono/node-server'
+import { loadSettings } from './config.ts'
+import { Database } from './db.ts'
+import { FolderWatcher } from './watcher.ts'
+import { createServer } from './server.ts'
+import { parsePair } from './parsePair.ts'
+
+const settings = loadSettings()
+const db = new Database(settings.databasePath)
+const watcher = new FolderWatcher(settings, db, parsePair)
+const app = createServer(db, watcher, settings)
+
+watcher.start()
+
+const server = serve({ fetch: app.fetch, port: settings.port, hostname: '127.0.0.1' }, (info) => {
+  console.log(`EMLAB backend listening on http://127.0.0.1:${info.port}`)
+})
+
+function shutdown() {
+  watcher.stop()
+  server.close(() => process.exit(0))
+}
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)
+```
+
+- [ ] **Step 2: Point the dashboard's dev proxy and build config at the new backend**
+
+The frontend's only required change per the spec is where `API_BASE` resolves. For this plan (pre-Electron), that means the Vite dev proxy in `dashboard/vite.config.ts:12-15` — already `http://127.0.0.1:8000`, which matches `loadSettings()`'s default port — needs no edit. Confirm this by inspecting the file; do not change it in this task.
+
+- [ ] **Step 3: Run it end-to-end against a fixture folder**
+
+```bash
+cd dashboard
+mkdir -p /tmp/emlab-e2e-watch
+EMLAB_WATCH_FOLDER=/tmp/emlab-e2e-watch EMLAB_DATABASE_PATH=/tmp/emlab-e2e.db EMLAB_PORT=8010 npm run serve &
+sleep 1
+curl -s http://127.0.0.1:8010/api/health
+echo
+curl -s http://127.0.0.1:8010/api/tests
+echo
+kill %1
+rm -rf /tmp/emlab-e2e-watch /tmp/emlab-e2e.db
+```
+
+Expected: the health check returns `{"ok":true,...}` with `watch_folder` and `database` pointing at the `/tmp` paths, and `/api/tests` returns `[]`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add dashboard/electron/serve.ts
+git commit -m "feat: add plain-node composition root for the backend"
+```
+
+---
+
+### Task 13: Remove the Python backend
+
+Only after Task 12's end-to-end check passes. This task has no tests of its own — it is a deletion, verified by re-running the full suite and the launcher script.
+
+**Files:**
+- Delete: `backend/` (entire directory)
+- Modify: `scripts/start_emlab.sh`
+- Modify: `scripts/setup_emlab.sh`
+- Modify: `scripts/com.emlab.daily-fev-library.plist.template`
+- Modify: `README.md`
+
+- [ ] **Step 1: Read the remaining launcher scripts before touching them**
+
+```bash
+cat scripts/setup_emlab.sh scripts/com.emlab.daily-fev-library.plist.template
+```
+
+Adjust Steps 2–3 below if their contents differ from what Task-writing assumed (they reference `backend/.venv` and `backend/run.py`); the goal is that nothing left in `scripts/` points at Python.
+
+- [ ] **Step 2: Delete the backend directory**
+
+```bash
+git rm -r backend/
+```
+
+- [ ] **Step 3: Rewrite `scripts/start_emlab.sh` to run the Node backend**
+
+```bash
+#!/bin/zsh
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT/dashboard"
+exec npm run serve
+```
+
+- [ ] **Step 4: Update `scripts/setup_emlab.sh` and the launchd plist template**
+
+Remove any `backend/.venv` creation or `pip install` steps; replace with `npm --prefix dashboard ci`. Update the plist template's `ProgramArguments` to invoke `scripts/start_emlab.sh` (unchanged path) rather than a Python interpreter directly, if it did so before.
+
+- [ ] **Step 5: Update `README.md`**
+
+Remove any reference to the Python backend, `backend/requirements.txt`, or a Python virtualenv. State that `npm --prefix dashboard ci && npm --prefix dashboard run build && ./scripts/start_emlab.sh` runs the app.
+
+- [ ] **Step 6: Run the full test suite**
+
+Run: `cd dashboard && npm test`
+Expected: PASS — no Python tests existed in this suite to begin with (they were pytest, run separately); this confirms nothing in `dashboard/` broke.
+
+- [ ] **Step 7: Run the launcher end-to-end**
+
+```bash
+cd dashboard && npm run build
+cd .. && EMLAB_WATCH_FOLDER=/tmp/emlab-launch-watch EMLAB_DATABASE_PATH=/tmp/emlab-launch.db EMLAB_PORT=8011 ./scripts/start_emlab.sh &
+sleep 2
+curl -s http://127.0.0.1:8011/api/health
+echo
+curl -s http://127.0.0.1:8011/
+kill %1
+rm -rf /tmp/emlab-launch-watch /tmp/emlab-launch.db
+```
+
+Expected: health check succeeds; `GET /` returns the built `index.html` (served via `serveStatic`), confirming the dashboard is served from the same origin as the API.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add -A
+git commit -m "chore: remove Python backend, Node is now the only runtime"
+```
+
+---
+
+## Definition of done for this plan
+
+- `backend/` no longer exists in the repository.
+- `dashboard/electron/` contains: `schema.ts`, `config.ts`, `db.ts`, `watcher.ts`, `export.ts`, `parsePair.ts`, `server.ts`, `serve.ts`, and a `.test.ts` beside each testable module.
+- `cd dashboard && npm test` passes, including 19 backend behavior tests (7 database, 6 watcher, 2 export, 7 server — see per-task counts above) ported from the original pytest suite.
+- `npm run serve` under plain Node serves the same 12 routes and the built dashboard from one origin, with no Python process involved.
+- `scripts/start_emlab.sh` launches the Node backend.
+
+This is the handoff point to **plan 2** (Electron shell — main/preload, first-run folder picker, `userData` paths, `utilityProcess` parsing) and **plan 3** (packaging + CI/CD), both to be written against this plan's `dashboard/electron/` module.
 
 ---
 
 ## Self-review notes
 
-- **Spec coverage:** `db.py` → Tasks 3–7. `watcher.py` → Task 9. `parser.py` deletion → Task 8. `export.py`, `main.py`, Python removal → Tasks 10–13. Transactions hazard → Task 4. mtime hazard → Task 6. Timestamp format hazard → `utcnow()` in Task 3, one format throughout.
-- **Naming consistency checked:** `testId` (function) vs `saveTest().testId` (field) are distinct on purpose; `hashFile` is the spied method in Task 9 and the definition in Task 9 Step 3; `sourceMeta` returns `modified_ns` as `string` in both Task 6 and its consumer in Task 9.
-- **Deviation from the Python:** `Settings` drops `host`, `auth_user`, `auth_password` per the spec's deletion of the auth layer. `Database` takes a path string rather than a `Settings` object, since it only ever used `database_path`.
+- **Spec coverage:** `db.py` → Tasks 3–7. `watcher.py` → Task 9. `parser.py` deletion → Task 8. `export.py` → Task 10. `main.py` routes → Task 11. Python removal → Task 13. Transactions hazard → Task 4. mtime hazard → Task 6. Timestamp format hazard → `utcnow()` in Task 3, one format throughout. Auth-layer deletion (spec's data-model decision) → explicitly called out in Task 11, `require_local`/`is_local`/Basic-auth are not ported.
+- **Naming consistency checked:** `testId` (function) vs `saveTest().testId` (field) are distinct on purpose; `hashFile` is the spied method in Task 9 and the definition in Task 9 Step 3; `sourceMeta` returns `modified_ns` as `string` in both Task 6 and its consumer in Task 9; `createServer(db, watcher, settings)` signature in Task 11 matches its two call sites (Task 11's tests, Task 12's `serve.ts`).
+- **Deviation from the Python:** `Settings` drops `host`, `auth_user`, `auth_password` per the spec's deletion of the auth layer. `Database` takes a path string rather than a `Settings` object, since it only ever used `database_path`. The Hono static-file and raw-`Response` behavior in Task 11 was verified with a live smoke test against `@hono/node-server@2.0.12` before this task was written, not assumed from documentation.
+- **Placeholder scan:** no TBD/TODO markers; every step has literal code, not a description of code.
