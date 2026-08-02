@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.electron-main.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./build-electron",
+    "rootDir": ".",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["electron", "electron-main"]
+}

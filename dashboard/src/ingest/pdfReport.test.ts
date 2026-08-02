@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { parseReportItems, type PageItems, type TextItem } from './pdfReport'
 
+// Real FEV report data — confidential, never committed (see .gitignore's
+// "OneDrive_*/" rule). Present on engineering machines only, so this suite
+// skips itself in CI and on any machine without the fixture checked out,
+// rather than failing on a file that was never meant to exist there.
 const DATA = resolve(__dirname, '../../../OneDrive_3_6-20-2026 (1)')
 const F1 = `${DATA}/OneDrive_1_6-20-2026/CITROEN_AIRCROSS_MT_9740_5099_2026-03-18_09-51-01_REPORT.pdf`
+const hasFixture = existsSync(F1)
 
 async function load(path: string): Promise<PageItems[]> {
   const doc = await getDocument({ data: new Uint8Array(readFileSync(path)), useSystemFonts: true }).promise
@@ -22,7 +27,7 @@ async function load(path: string): Promise<PageItems[]> {
   return pages
 }
 
-describe('parseReportItems (FEV template, ground truth = compile workbook)', () => {
+describe.skipIf(!hasFixture)('parseReportItems (FEV template, ground truth = compile workbook)', () => {
   it('extracts complete-cycle results for 18-Mar-2026 CC24/MT', async () => {
     const r = parseReportItems(await load(F1))
     // complete-cycle Specific [mg/km] — must be complete cycle, NOT Phase 1 (262.0)

@@ -14,7 +14,15 @@ function configPath(userDataDir: string): string {
 export function readUserConfig(userDataDir: string): UserConfig | null {
   const file = configPath(userDataDir)
   if (!fs.existsSync(file)) return null
-  return JSON.parse(fs.readFileSync(file, 'utf-8'))
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8'))
+  } catch {
+    // A corrupt config.json (e.g. from a crash mid-write) must not
+    // permanently brick the app -- treat it the same as "no config" so the
+    // first-run picker reappears instead of the app failing to start with
+    // no way for a non-technical user to recover.
+    return null
+  }
 }
 
 function writeUserConfig(userDataDir: string, config: UserConfig): void {
