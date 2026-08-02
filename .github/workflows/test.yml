@@ -1,0 +1,35 @@
+name: Test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: dashboard
+        run: npx tsc -b
+
+      - name: Lint
+        working-directory: dashboard
+        run: npm run lint
+
+      - name: Test
+        working-directory: dashboard
+        run: npm test
