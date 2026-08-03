@@ -11,6 +11,24 @@ describe('sanitizeFolderName', () => {
   it('falls back when empty after stripping', () => {
     expect(sanitizeFolderName('///')).toBe('program')
   })
+  it('neutralises traversal names', () => {
+    expect(sanitizeFolderName('..')).toBe('program')
+    expect(sanitizeFolderName('.')).toBe('program')
+    expect(sanitizeFolderName('...')).toBe('program')
+    expect(sanitizeFolderName('../../etc')).toBe('etc')
+    expect(sanitizeFolderName('a/../b')).toBe('a_b')
+  })
+  it('rejects Windows reserved device names', () => {
+    expect(sanitizeFolderName('CON')).toBe('program')
+    expect(sanitizeFolderName('com1')).toBe('program')
+  })
+})
+
+describe('uniqueProgramFolder traversal safety', () => {
+  it('never escapes the root for a traversal name', () => {
+    expect(uniqueProgramFolder('/root', '..', () => false)).toBe('/root/program')
+    expect(uniqueProgramFolder('/root', '../../etc/passwd', () => false)).toBe('/root/etc_passwd')
+  })
 })
 
 describe('uniqueProgramFolder', () => {

@@ -62,6 +62,23 @@ describe('server', () => {
     expect((await (await app.request('/api/programs')).json())).toEqual([])
   })
 
+  it('contains a traversal-style program name inside the watch root', async () => {
+    const res = await app.request('/api/programs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '../../escape' }),
+    })
+    expect(res.status).toBe(200)
+    const prog = (await res.json()) as any
+    const root = path.resolve(path.join(dir, 'watch'))
+    expect(path.resolve(prog.folder).startsWith(root + path.sep)).toBe(true)
+  })
+
+  it('rejects an over-long program name', async () => {
+    const res = await app.request('/api/programs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x'.repeat(81) }),
+    })
+    expect(res.status).toBe(400)
+  })
+
   it('rejects a duplicate program name', async () => {
     const headers = { 'Content-Type': 'application/json' }
     const body = JSON.stringify({ name: 'STLA' })

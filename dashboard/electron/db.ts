@@ -332,9 +332,11 @@ export class Database {
 
   deleteProgram(id: string): boolean {
     return this.tx(() => {
-      // tests cascade their pollutant_results/phases/trace_points via FK; jobs
-      // point at those tests with ON DELETE SET NULL. The folder stays on disk;
-      // with no registered program the watcher will not re-ingest it.
+      // Remove ingestion jobs for this program's tests first (they'd otherwise
+      // be left orphaned with a NULLed test_id). Then delete the tests, which
+      // cascade their pollutant_results/phases/trace_points via FK. The folder
+      // stays on disk; with no registered program the watcher won't re-ingest.
+      this.db.prepare('DELETE FROM ingestion_jobs WHERE test_id IN (SELECT id FROM tests WHERE program_id=?)').run(id)
       this.db.prepare('DELETE FROM tests WHERE program_id=?').run(id)
       return this.db.prepare('DELETE FROM programs WHERE id=?').run(id).changes > 0
     })

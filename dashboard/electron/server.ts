@@ -186,9 +186,16 @@ export function createServer(
     const { name } = await c.req.json()
     const trimmed = String(name ?? '').trim()
     if (!trimmed) return c.json({ detail: 'Program name is required' }, 400)
+    if (trimmed.length > 80) return c.json({ detail: 'Program name is too long (max 80 characters)' }, 400)
     const clash = db.listPrograms().some((p) => String(p.name).toLowerCase() === trimmed.toLowerCase())
     if (clash) return c.json({ detail: 'A program with that name already exists' }, 409)
     const folder = uniqueProgramFolder(settings.watchFolder, trimmed, (p) => fs.existsSync(p))
+    // Defence in depth: the sanitizer already strips traversal, but never create
+    // or register a folder that resolves outside the watch root.
+    const root = path.resolve(settings.watchFolder)
+    if (path.resolve(folder) !== root && !path.resolve(folder).startsWith(root + path.sep)) {
+      return c.json({ detail: 'Invalid program name' }, 400)
+    }
     fs.mkdirSync(folder, { recursive: true })
     return c.json(db.createProgram(trimmed, folder))
   })
@@ -197,6 +204,7 @@ export function createServer(
     const { name } = await c.req.json()
     const trimmed = String(name ?? '').trim()
     if (!trimmed) return c.json({ detail: 'Program name is required' }, 400)
+    if (trimmed.length > 80) return c.json({ detail: 'Program name is too long (max 80 characters)' }, 400)
     const clash = db.listPrograms().some(
       (p) => p.id !== c.req.param('id') && String(p.name).toLowerCase() === trimmed.toLowerCase())
     if (clash) return c.json({ detail: 'A program with that name already exists' }, 409)

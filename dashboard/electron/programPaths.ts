@@ -1,12 +1,20 @@
 import path from 'node:path'
 
-/** Turn a program name into a filesystem-safe folder segment. */
+// Windows reserved device names (case-insensitive) — a folder named CON/PRN/…
+// is rejected by the OS, so map them to the fallback.
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
+/** Turn a program name into a filesystem-safe folder segment.
+ *  Collapses path separators, Windows-illegal chars, dots, whitespace and
+ *  control chars to '_', so a name can never contain a `.`/`..` traversal
+ *  component or otherwise escape the root. */
 export function sanitizeFolderName(name: string): string {
   const cleaned = name
     .trim()
-    .replace(/[<>:"/\\|?* -]+/g, '_')
+    .replace(/[<>:"/\\|?*.\s\x00-\x1f-]+/g, '_')
     .replace(/^_+|_+$/g, '')
-  return cleaned || 'program'
+  if (!cleaned || RESERVED.test(cleaned)) return 'program'
+  return cleaned
 }
 
 /**
