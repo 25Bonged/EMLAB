@@ -10,6 +10,14 @@ if (typeof window !== 'undefined' && window.emlab) {
 const API_BASE = bridge?.base ?? import.meta.env.VITE_API_BASE ?? '/api'
 const AUTH_HEADERS: Record<string, string> = bridge?.token ? { 'x-emlab-token': bridge.token } : {}
 
+export interface Program {
+  id: string
+  name: string
+  folder: string
+  created_at: string
+  test_count: number
+}
+
 export interface Health {
   ok: boolean
   can_edit: boolean
@@ -42,12 +50,17 @@ export const api = {
   tests: () => request<Test[]>('/tests?include_nonaccepted=true&summary=true'),
   test: (id: string) => request<Test>(`/tests/${id}`),
   ingestion: () => request<IngestionJob[]>('/ingestion'),
+  programs: () => request<Program[]>('/programs'),
+  createProgram: (name: string) => request<Program>('/programs', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameProgram: (id: string, name: string) => request<{ ok: true }>(`/programs/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  removeProgram: (id: string) => request<{ ok: true }>(`/programs/${id}`, { method: 'DELETE' }),
   patchTest: (id: string, patch: Partial<Test>) => request<Test>(`/tests/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   approve: (id: string) => request<{ ok: true }>(`/tests/${id}/approve`, { method: 'POST' }),
   quarantine: (id: string) => request<{ ok: true }>(`/tests/${id}/quarantine`, { method: 'POST' }),
   remove: (id: string) => request<{ ok: true }>(`/tests/${id}`, { method: 'DELETE' }),
   rescan: () => request<{ ok: true }>('/ingestion/rescan', { method: 'POST' }),
-  importParsed: (tests: Test[]) => request<{ count: number }>('/tests/import-parsed', { method: 'POST', body: JSON.stringify({ tests }) }),
+  importParsed: (tests: Test[], programId?: string | null) =>
+    request<{ count: number }>('/tests/import-parsed', { method: 'POST', body: JSON.stringify({ tests, program_id: programId ?? null }) }),
   // Downloads go through fetch rather than a plain <a href> so they can carry
   // the auth header. Putting the token in the URL instead would leak it into
   // browser history and any logs.
