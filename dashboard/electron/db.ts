@@ -196,7 +196,17 @@ export class Database {
       this.db.prepare(`
         INSERT INTO source_files(test_id,stem,kind,path,sha256,size_bytes,modified_ns,first_seen_at,last_seen_at)
         VALUES(?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(path) DO UPDATE SET test_id=excluded.test_id,sha256=excluded.sha256,
+        ON CONFLICT(path) DO UPDATE SET
+          -- COALESCE, not excluded.test_id. The watcher re-registers every
+          -- source on every scan (watcher.ts, discovery pass) with no test id,
+          -- because the pair has not been parsed yet at that point. Assigning
+          -- excluded.test_id there wiped the link written by the post-parse
+          -- pass, so within one scan interval every source_files row went back
+          -- to NULL and sourcePath() never resolved -- evidence downloads
+          -- 404'd for every watcher-ingested test. Only ever promote NULL to a
+          -- real id, never demote.
+          test_id=COALESCE(excluded.test_id, source_files.test_id),
+          sha256=excluded.sha256,
           size_bytes=excluded.size_bytes,modified_ns=excluded.modified_ns,last_seen_at=excluded.last_seen_at
       `).run(testIdValue, stem, kind, filePath, sha256, Number(stat.size), String(stat.mtimeNs), now, now)
     })

@@ -196,4 +196,23 @@ describe('Database', () => {
   it('setJ2951 on an unknown id returns false', () => {
     expect(db.setJ2951('missing', { calcVersion: CALC_VERSION })).toBe(false)
   })
+
+  // Regression: the watcher's discovery pass re-registers every source on every
+  // scan with no test id, because the pair has not been parsed yet. When the
+  // UPSERT assigned excluded.test_id unconditionally, that wiped the link the
+  // post-parse pass had written, and evidence downloads 404'd forever.
+  it('does not unlink a source when re-registered without a test id', () => {
+    const file = path.join(dir, 'evidence.pdf')
+    writeFileSync(file, 'pdf bytes')
+    const { testId } = db.saveTest(sampleTest(), 'stem', 'h-src', 'accepted', 'ok')
+
+    db.registerSource('stem', 'pdf', file, 'hash')            // discovery pass
+    expect(db.sourcePath(testId, 'pdf')).toBeNull()
+
+    db.registerSource('stem', 'pdf', file, 'hash', testId)    // post-parse pass
+    expect(db.sourcePath(testId, 'pdf')).toBe(file)
+
+    db.registerSource('stem', 'pdf', file, 'hash2')           // next scan, no id
+    expect(db.sourcePath(testId, 'pdf')).toBe(file)           // link must survive
+  })
 })

@@ -3,7 +3,7 @@ export {}
 declare global {
   interface Window {
     emlab?: {
-      apiBase(): Promise<string>
+      apiConfig(): Promise<{ base: string; token: string }>
     }
   }
 }

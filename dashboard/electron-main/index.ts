@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { serve } from '@hono/node-server'
 import fs from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Database } from '../electron/db.ts'
@@ -34,6 +35,7 @@ const IS_DEV = Boolean(process.env.EMLAB_DEV)
 
 let mainWindow: BrowserWindow | null = null
 let resolvedApiBase = ''
+let apiToken = ''
 let resolvedAppUrl = ''
 
 async function pickWatchFolder(): Promise<string | null> {
@@ -68,7 +70,10 @@ async function start(): Promise<void> {
 
   const { parsePair, dispose: disposeParser } = createParsePairProcess()
   const watcher = new FolderWatcher(settings, db, parsePair)
-  const honoApp = createServer(db, watcher, settings)
+  // 256 bits of entropy, regenerated each launch and never written to disk.
+  // Only the renderer receives it, via the contextIsolated preload bridge.
+  apiToken = randomBytes(32).toString('hex')
+  const honoApp = createServer(db, watcher, settings, apiToken)
 
   const server = serve({ fetch: honoApp.fetch, port: 0, hostname: '127.0.0.1' }, (info) => {
     resolvedApiBase = `http://127.0.0.1:${info.port}/api`
@@ -139,7 +144,7 @@ function createWindow(): void {
   mainWindow.loadURL(IS_DEV ? 'http://127.0.0.1:5173' : resolvedAppUrl)
 }
 
-ipcMain.handle('emlab:api-base', () => resolvedApiBase)
+ipcMain.handle('emlab:api-config', () => ({ base: resolvedApiBase, token: apiToken }))
 
 app.whenReady().then(start).catch((error) => {
   // Without this, a rejection anywhere in start() (a corrupt config file, a

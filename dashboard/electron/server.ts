@@ -3,7 +3,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { serveStatic } from '@hono/node-server/serve-static'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createHash } from 'node:crypto'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import type { Database } from './db.ts'
 import type { FolderWatcher } from './watcher.ts'
 import { exportXlsx } from './export.ts'
@@ -35,8 +35,36 @@ function sortKeysDeep(value: any): any {
   return value
 }
 
-export function createServer(db: Database, watcher: FolderWatcher, settings: Settings): Hono {
+/** Constant-time compare, so a wrong token cannot be recovered by timing. */
+function tokenMatches(supplied: string, expected: string): boolean {
+  const a = Buffer.from(supplied)
+  const b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+export function createServer(
+  db: Database,
+  watcher: FolderWatcher,
+  settings: Settings,
+  /** Shared secret the renderer must present. Omit to run unauthenticated
+   *  (standalone dev only — the Electron app always supplies one). */
+  authToken?: string,
+): Hono {
   const app = new Hono()
+
+  // Loopback binding stops remote machines, and the Origin/Host guards below
+  // stop browsers. Neither stops another *local* process from reading the
+  // whole confidential library over 127.0.0.1. The renderer gets this token
+  // through Electron's IPC bridge, which no other process can read.
+  if (authToken) {
+    app.use('/api/*', async (c, next) => {
+      const supplied = c.req.header('x-emlab-token') ?? ''
+      if (!supplied || !tokenMatches(supplied, authToken)) {
+        return c.json({ detail: 'Unauthorized' }, 401)
+      }
+      await next()
+    })
+  }
 
   // The server binds 127.0.0.1, but that alone protects nothing against a
   // browser: any page the user visits can reach it. Two distinct attacks and

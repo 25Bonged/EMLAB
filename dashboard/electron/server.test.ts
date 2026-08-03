@@ -206,3 +206,50 @@ describe('server security guards', () => {
     expect(detail.trace.dilute).toHaveLength(1)
   })
 })
+
+describe('server API token', () => {
+  let dir: string, db: Database, watcher: FolderWatcher, app: ReturnType<typeof createServer>
+  const TOKEN = 'a'.repeat(64)
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'emlab-tok-'))
+    mkdirSync(path.join(dir, 'watch'))
+    db = new Database(path.join(dir, 'test.db'))
+    watcher = new FolderWatcher({ watchFolder: path.join(dir, 'watch'), scanIntervalSeconds: 1 }, db, async () => sampleTest())
+    app = createServer(db, watcher, {
+      watchFolder: path.join(dir, 'watch'), databasePath: path.join(dir, 'test.db'),
+      port: 0, scanIntervalSeconds: 1, dashboardDist: path.join(dir, 'nonexistent-dist'),
+    }, TOKEN)
+  })
+  afterEach(() => {
+    watcher.stop()
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  const withToken = (t: string) => ({ headers: { host: '127.0.0.1:8000', 'x-emlab-token': t } })
+
+  it('rejects a request with no token', async () => {
+    expect((await app.request('/api/tests', { headers: { host: '127.0.0.1:8000' } })).status).toBe(401)
+  })
+
+  it('rejects a wrong token, including one of the same length', async () => {
+    expect((await app.request('/api/tests', withToken('b'.repeat(64)))).status).toBe(401)
+    expect((await app.request('/api/tests', withToken('short'))).status).toBe(401)
+  })
+
+  it('accepts the correct token', async () => {
+    expect((await app.request('/api/tests', withToken(TOKEN))).status).toBe(200)
+  })
+
+  it('guards mutations and downloads too, not just reads', async () => {
+    expect((await app.request('/api/ingestion/rescan', { method: 'POST', headers: { host: '127.0.0.1:8000' } })).status).toBe(401)
+    expect((await app.request('/api/export.xlsx', { headers: { host: '127.0.0.1:8000' } })).status).toBe(401)
+  })
+
+  it('serves the SPA without a token — only /api is guarded', async () => {
+    // Not 401: static assets carry no confidential data and the renderer must
+    // load before it can present a token.
+    expect((await app.request('/', { headers: { host: '127.0.0.1:8000' } })).status).not.toBe(401)
+  })
+})

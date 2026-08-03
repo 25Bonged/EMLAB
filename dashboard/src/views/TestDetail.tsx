@@ -82,8 +82,8 @@ export function TestDetail() {
           <Meta label="RLD A/B/C" value={t.rld.A != null ? `${t.rld.A} / ${t.rld.B} / ${t.rld.C}` : '—'} />
           <Meta label="Library status" value={(t.status ?? 'accepted').replace('_', ' ')} />
           <Meta label="Source result unit" value={t.units?.resultsSource ?? 'mg/km'} />
-          {t.source.pdf && <a className="evidence-link" href={api.evidenceUrl(t.id, 'pdf')} target="_blank" rel="noreferrer">Open report PDF ↗</a>}
-          {t.source.xlsm && <a className="evidence-link" href={api.evidenceUrl(t.id, 'xlsm')}>Download traces XLSM ↓</a>}
+          {t.source.pdf && <button className="evidence-link" onClick={() => api.downloadOrReport(() => api.downloadEvidence(t.id, 'pdf'), 'Report PDF download')}>Open report PDF ↗</button>}
+          {t.source.xlsm && <button className="evidence-link" onClick={() => api.downloadOrReport(() => api.downloadEvidence(t.id, 'xlsm'), 'Trace XLSM download')}>Download traces XLSM ↓</button>}
         </div>
       </Panel>
 

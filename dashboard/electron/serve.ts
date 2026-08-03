@@ -13,7 +13,13 @@ const backfilled = backfillJ2951(db)
 if (backfilled > 0) console.log(`J2951: backfilled ${backfilled} test(s)`)
 
 const watcher = new FolderWatcher(settings, db, parsePair)
-const app = createServer(db, watcher, settings)
+// Standalone dev server. The packaged Electron app always tokenises the API;
+// here it is opt-in via EMLAB_TOKEN so the vite browser workflow still works.
+const authToken = process.env.EMLAB_TOKEN || undefined
+if (!authToken) {
+  console.warn('EMLAB: API is UNAUTHENTICATED (set EMLAB_TOKEN to require a token). Dev use only.')
+}
+const app = createServer(db, watcher, settings, authToken)
 
 watcher.start()
 

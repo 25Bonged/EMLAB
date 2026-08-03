@@ -47,7 +47,7 @@ export function MasterTable() {
             {rows.length} test{rows.length !== 1 ? 's' : ''}
           </h2>
         </div>
-        <a className="btn" style={{ marginLeft: 'auto', textDecoration: 'none' }} href={api.exportUrl(false)}>Export Excel</a>
+        <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => api.downloadOrReport(() => api.downloadExport(false), 'Excel export')}>Export Excel</button>
       </div>
       <FilterBar />
       <Panel ticks={false} className="rise">
