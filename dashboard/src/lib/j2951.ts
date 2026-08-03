@@ -3,36 +3,44 @@ import type {
 } from '../model/types'
 
 /** Bump to force `electron/backfill.ts` to recompute the whole library. */
-export const CALC_VERSION = 3
+export const CALC_VERSION = 4
 
 /** AIS-175 Annex B2 §3.1 rotating-mass factor. */
 export const DEFAULT_KR = 1.03
 
 /**
- * Accept/reject criteria from AIS-175 Annex B7 §7 (IWR / SAE J2951), as stated
- * in CC24MB6_IWR_TestCell_SOP:
+ * Accept/reject criteria — PRIMARY SOURCE: AIS-175, Annex B6,
+ * paragraph 2.6.8.3.1.3 "Tolerance (3)" (Type I test) and 2.6.8.3.1.4
+ * "Tolerance (4)" (CoP test), which are numerically identical:
  *
- *   metric    legal band              target for FE runs   reject if
- *   IWR       −2.0 % … +4.0 %         −2 % (low edge)      outside −2 … +4 %
- *   RMSSE     < 1.3 km/h              < 1.0 km/h           > 1.3 km/h
- *   distance  within ±1 % of target                        > +1.5 %
+ *   (a) IWR shall be in the range of (- 2.0 < IWR < + 4.0) per cent;
+ *   (b) RMSSE, less than 1.3 km/h.
  *
- * "A run with IWR > +4 % or < −2 % is NOT a valid Type-I trace — re-drive it."
+ * Note the STRICT inequalities. Exactly -2.0 or exactly +4.0 is outside the
+ * range, as is exactly 1.3 km/h. The calculation itself is defined by
+ * Annex B7 paragraph 7.2: "The following indices shall be calculated
+ * according to SAE J2951 (Revised JAN2014)" - and only IWR and RMSSE are
+ * regulated. DR, ER, EER and ASCR are computed and reported for engineering
+ * use, but they are not pass/fail criteria and are excluded from the verdict.
  *
- * The IWR band is ASYMMETRIC. An earlier version of this file used ±4.0 %,
- * taken from the analyser workbook's uncited LIMITS note; that wrongly passed
- * economical-but-illegal runs down to −4 %. Three separate documents
- * (TestCell SOP, IWR one-pager, IWR deep dive) agree on −2.0 … +4.0 and cite
- * the regulation, so that is what is enforced here.
+ * The band is ASYMMETRIC. An earlier version used +/-4.0 %, from the analyser
+ * workbook's uncited LIMITS note, which wrongly passed economical-but-illegal
+ * runs down to -4 %.
  *
- * Distance has a genuine grey zone: legal is ±1 %, rejection starts past
- * 1.5 %, so 1.0–1.5 % is flagged rather than failed.
+ * `distance*` is NOT from AIS-175 - the regulation only requires distance to
+ * be recorded per phase (Annex B6 2.6.8.2). The +/-1 % legal / 1.5 % reject
+ * figures come from CC24MB6_IWR_TestCell_SOP, so they are a house rule and
+ * are banded warn-then-fail rather than treated as regulatory.
+ *
+ * A separate band exists for OVC-HEV charge-depleting tests (Annex B7 7.4.2.2:
+ * individual cycles "not less than -3.0 nor greater than +5.0 per cent").
+ * EMLAB scores pure-ICE Type I tests, so it is not applied here.
  */
 export const BANDS = {
   iwrMin: -2.0,
   iwrMax: 4.0,
-  rmssePass: 1.3,
-  /** Advisory target, not a limit — the SOP tells drivers to trim toward this. */
+  rmsseMax: 1.3,
+  /** Advisory target from the test-cell SOP, not a limit. */
   rmsseTarget: 1.0,
   distancePass: 0.01,
   distanceReject: 0.015,
@@ -182,8 +190,10 @@ function worse(a: RagLevel, b: RagLevel): RagLevel {
 export function verdictFor(i: J2951Indices): J2951Verdict {
   // Binary by the SOP's own wording: outside the band the run is not a valid
   // Type-I trace. No "marginal" tier is invented for IWR or RMSSE.
-  const iwr: RagLevel = i.iwr >= BANDS.iwrMin && i.iwr <= BANDS.iwrMax ? 'pass' : 'fail'
-  const rmsse: RagLevel = i.rmsse <= BANDS.rmssePass ? 'pass' : 'fail'
+  // Strict inequalities, exactly as the regulation words them:
+  // "(- 2.0 < IWR < + 4.0)" and "RMSSE, less than 1.3 km/h".
+  const iwr: RagLevel = i.iwr > BANDS.iwrMin && i.iwr < BANDS.iwrMax ? 'pass' : 'fail'
+  const rmsse: RagLevel = i.rmsse < BANDS.rmsseMax ? 'pass' : 'fail'
   const driftPct = i.distTargetKm > 0 ? Math.abs(i.distActualKm - i.distTargetKm) / i.distTargetKm : 0
   const distance: RagLevel = driftPct <= BANDS.distancePass ? 'pass'
     : driftPct <= BANDS.distanceReject ? 'warn' : 'fail'
@@ -218,6 +228,26 @@ function unavailable(
   }
 }
 
+/**
+ * KNOWN DEVIATION FROM AIS-175, Annex B7 paragraph 7.1:
+ *
+ *   "In the case that the accelerator control is fully activated, the
+ *    prescribed speed shall be used instead of the actual vehicle speed for
+ *    drive trace index calculations during such periods of operation."
+ *
+ * That substitution is NOT applied here, because the bench's
+ * Dilute_Results_Trace carries speed, force, power and gas channels but no
+ * accelerator-position signal, and the regulation names OBD/ECU monitoring as
+ * the way to detect it. Without that channel the condition cannot be
+ * identified, so full-throttle stretches where the vehicle physically could
+ * not hold the trace are scored as if they were driver error.
+ *
+ * Effect: for a vehicle that cannot meet the cycle's acceleration or top
+ * speed, the reported IWR and RMSSE are PESSIMISTIC. For a vehicle with
+ * adequate performance -- which the WLTC 3b runs here are, peaking at ~31 kW
+ * of 81 kW available -- there is no difference. Revisit if an accelerator
+ * channel is ever added to the trace export.
+ */
 /**
  * Guarded entry point. Every failure mode returns a distinct reason code with
  * null indices — never a plausible-looking number computed from bad input.

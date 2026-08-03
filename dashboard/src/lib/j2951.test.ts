@@ -94,10 +94,19 @@ describe('verdictFor — AIS-175 Annex B7 §7 accept/reject rule', () => {
 
   // The band is asymmetric: -2.0 .. +4.0, NOT +/-4.0. This is the whole point
   // of the correction -- an economical-but-illegal run at -3 % used to pass.
-  it('passes inside the legal band', () => {
-    expect(verdictFor(idx(-2.0, 1.2)).iwr).toBe('pass')
+  it('passes strictly inside the legal band', () => {
+    expect(verdictFor(idx(-1.99, 1.2)).iwr).toBe('pass')
     expect(verdictFor(idx(0, 1.2)).iwr).toBe('pass')
-    expect(verdictFor(idx(4.0, 1.3)).iwr).toBe('pass')
+    expect(verdictFor(idx(3.99, 1.2)).iwr).toBe('pass')
+  })
+
+  // AIS-175 Annex B6 2.6.8.3.1.3 words it as "(- 2.0 < IWR < + 4.0)" and
+  // "RMSSE, less than 1.3" — strict, so the endpoints themselves are OUT.
+  it('treats the endpoints as outside, per the strict inequality', () => {
+    expect(verdictFor(idx(-2.0, 1.2)).iwr).toBe('fail')
+    expect(verdictFor(idx(4.0, 1.2)).iwr).toBe('fail')
+    expect(verdictFor(idx(0, 1.3)).rmsse).toBe('fail')
+    expect(verdictFor(idx(0, 1.299)).rmsse).toBe('pass')
   })
 
   it('fails below -2.0 %, the economy edge of the band', () => {
@@ -111,8 +120,7 @@ describe('verdictFor — AIS-175 Annex B7 §7 accept/reject rule', () => {
     expect(verdictFor(idx(5.2635, 1.0)).iwr).toBe('fail')
   })
 
-  it('fails RMSSE above 1.3 km/h', () => {
-    expect(verdictFor(idx(0, 1.3)).rmsse).toBe('pass')
+  it('fails RMSSE at or above 1.3 km/h', () => {
     expect(verdictFor(idx(0, 1.31)).rmsse).toBe('fail')
   })
 
@@ -135,7 +143,7 @@ describe('verdictFor — AIS-175 Annex B7 §7 accept/reject rule', () => {
   it('keeps the cited thresholds in one place', () => {
     expect(BANDS.iwrMin).toBe(-2.0)
     expect(BANDS.iwrMax).toBe(4.0)
-    expect(BANDS.rmssePass).toBe(1.3)
+    expect(BANDS.rmsseMax).toBe(1.3)
     expect(BANDS.distancePass).toBe(0.01)
     expect(BANDS.distanceReject).toBe(0.015)
   })
