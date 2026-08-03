@@ -84,19 +84,19 @@ export class Database {
       }
 
       this.db.prepare(`
-        INSERT INTO tests(id,identity_key,active,status,project,cycle,config,transmission,lab,vehicle_model,
+        INSERT INTO tests(id,identity_key,active,status,project,program_id,cycle,config,transmission,lab,vehicle_model,
           vn_no,vin_sample_id,test_date,catalyst_state,odo,imported_at,updated_at,parser_version,
           data_json,low_confidence_json,combined_hash)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
-          status=excluded.status, project=excluded.project, cycle=excluded.cycle, config=excluded.config,
+          status=excluded.status, project=excluded.project, program_id=excluded.program_id, cycle=excluded.cycle, config=excluded.config,
           transmission=excluded.transmission, lab=excluded.lab, vehicle_model=excluded.vehicle_model,
           vn_no=excluded.vn_no, vin_sample_id=excluded.vin_sample_id, test_date=excluded.test_date,
           catalyst_state=excluded.catalyst_state, odo=excluded.odo, updated_at=excluded.updated_at,
           parser_version=excluded.parser_version, data_json=excluded.data_json,
           low_confidence_json=excluded.low_confidence_json, combined_hash=excluded.combined_hash, active=1
       `).run(
-        id, identity, 1, status, test.project ?? null, test.cycle ?? null, test.config ?? null,
+        id, identity, 1, status, test.project ?? null, test.program_id ?? null, test.cycle ?? null, test.config ?? null,
         test.transmission ?? null, test.lab ?? null, test.vehicleModel ?? null, test.vnNo ?? null,
         test.vinSampleId ?? null, test.date ?? null, test.catalystState ?? null, test.odo ?? null,
         test.importedAt || now, now, 'fev-js-v1', JSON.stringify(test),
@@ -292,6 +292,51 @@ export class Database {
       this.db.prepare("UPDATE ingestion_jobs SET status='deleted', updated_at=? WHERE test_id=?")
         .run(utcnow(), id)
       return this.db.prepare('DELETE FROM tests WHERE id=?').run(id).changes > 0
+    })
+  }
+
+  createProgram(name: string, folder: string): { id: string; name: string; folder: string; created_at: string } {
+    const id = createHash('sha256').update(`${folder}|${name}`).digest('hex').slice(0, 16)
+    const now = utcnow()
+    this.tx(() => {
+      this.db.prepare('INSERT INTO programs(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, name, folder, now)
+    })
+    return { id, name, folder, created_at: now }
+  }
+
+  listPrograms(): Record<string, any>[] {
+    return this.db.prepare(`
+      SELECT p.id, p.name, p.folder, p.created_at,
+        (SELECT COUNT(*) FROM tests t WHERE t.program_id=p.id AND t.active=1) AS test_count
+      FROM programs p ORDER BY p.created_at ASC
+    `).all() as Record<string, any>[]
+  }
+
+  getProgram(id: string): Record<string, any> | null {
+    const row = this.db.prepare('SELECT id,name,folder,created_at FROM programs WHERE id=?').get(id) as
+      | Record<string, any> | undefined
+    return row ?? null
+  }
+
+  renameProgram(id: string, name: string): boolean {
+    return this.tx(() => {
+      const changed = this.db.prepare('UPDATE programs SET name=? WHERE id=?').run(name, id).changes > 0
+      if (changed) {
+        // keep the denormalized display name on the linked tests in sync
+        this.db.prepare("UPDATE tests SET project=?, data_json=json_set(data_json,'$.project',?) WHERE program_id=?")
+          .run(name, name, id)
+      }
+      return changed
+    })
+  }
+
+  deleteProgram(id: string): boolean {
+    return this.tx(() => {
+      // tests cascade their pollutant_results/phases/trace_points via FK; jobs
+      // point at those tests with ON DELETE SET NULL. The folder stays on disk;
+      // with no registered program the watcher will not re-ingest it.
+      this.db.prepare('DELETE FROM tests WHERE program_id=?').run(id)
+      return this.db.prepare('DELETE FROM programs WHERE id=?').run(id).changes > 0
     })
   }
 

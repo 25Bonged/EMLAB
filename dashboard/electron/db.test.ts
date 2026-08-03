@@ -215,4 +215,22 @@ describe('Database', () => {
     db.registerSource('stem', 'pdf', file, 'hash2')           // next scan, no id
     expect(db.sourcePath(testId, 'pdf')).toBe(file)           // link must survive
   })
+
+  it('creates, lists, renames (cascading to tests) and deletes programs', () => {
+    const p = db.createProgram('STLA', '/root/STLA')
+    expect(p.name).toBe('STLA')
+    expect(db.listPrograms().map((x) => x.name)).toEqual(['STLA'])
+
+    db.saveTest({ ...sampleTest(), program_id: p.id }, 'STLA_2026-01-01_09-00-00', 'h1', 'accepted', 'ok')
+    expect(db.listTests()[0].project).toBe('STLA')
+    expect(db.listPrograms()[0].test_count).toBe(1)
+
+    expect(db.renameProgram(p.id, 'Stellantis')).toBe(true)
+    expect(db.listPrograms()[0].name).toBe('Stellantis')
+    expect(db.listTests()[0].project).toBe('Stellantis')
+
+    expect(db.deleteProgram(p.id)).toBe(true)
+    expect(db.listPrograms()).toEqual([])
+    expect(db.listTests()).toEqual([])
+  })
 })
