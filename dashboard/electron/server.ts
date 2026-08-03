@@ -7,6 +7,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import type { Database } from './db.ts'
 import type { FolderWatcher } from './watcher.ts'
 import { exportXlsx } from './export.ts'
+import { uniqueProgramFolder } from './programPaths.ts'
 import type { Settings } from './config.ts'
 
 /** Hosts this API may legitimately be addressed as. */
@@ -139,8 +140,10 @@ export function createServer(
   app.post('/api/tests/import-parsed', async (c) => {
     const payload = await c.req.json()
     const tests: Record<string, any>[] = payload.tests ?? []
+    const program = payload.program_id ? db.getProgram(payload.program_id) : null
     const imported: string[] = []
     for (const test of tests) {
+      if (program) { test.program_id = program.id; test.project = program.name }
       const stem = test.id ?? 'manual-import'
       const digest = createHash('sha256').update(JSON.stringify(sortKeysDeep(test))).digest('hex')
       const status = test.lowConfidence?.length ? 'quarantined' : 'accepted'
@@ -176,6 +179,33 @@ export function createServer(
       },
     })
   })
+
+  app.get('/api/programs', (c) => c.json(db.listPrograms()))
+
+  app.post('/api/programs', async (c) => {
+    const { name } = await c.req.json()
+    const trimmed = String(name ?? '').trim()
+    if (!trimmed) return c.json({ detail: 'Program name is required' }, 400)
+    const clash = db.listPrograms().some((p) => String(p.name).toLowerCase() === trimmed.toLowerCase())
+    if (clash) return c.json({ detail: 'A program with that name already exists' }, 409)
+    const folder = uniqueProgramFolder(settings.watchFolder, trimmed, (p) => fs.existsSync(p))
+    fs.mkdirSync(folder, { recursive: true })
+    return c.json(db.createProgram(trimmed, folder))
+  })
+
+  app.patch('/api/programs/:id', async (c) => {
+    const { name } = await c.req.json()
+    const trimmed = String(name ?? '').trim()
+    if (!trimmed) return c.json({ detail: 'Program name is required' }, 400)
+    const clash = db.listPrograms().some(
+      (p) => p.id !== c.req.param('id') && String(p.name).toLowerCase() === trimmed.toLowerCase())
+    if (clash) return c.json({ detail: 'A program with that name already exists' }, 409)
+    return db.renameProgram(c.req.param('id'), trimmed)
+      ? c.json({ ok: true }) : c.json({ detail: 'Program not found' }, 404)
+  })
+
+  app.delete('/api/programs/:id', (c) =>
+    db.deleteProgram(c.req.param('id')) ? c.json({ ok: true }) : c.json({ detail: 'Program not found' }, 404))
 
   app.get('/api/ingestion', (c) => c.json(db.listJobs()))
 

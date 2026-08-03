@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Database } from './db.ts'
@@ -38,6 +38,36 @@ describe('server', () => {
     const res = await app.request('/api/health')
     expect(res.status).toBe(200)
     expect(((await res.json()) as any).ok).toBe(true)
+  })
+
+  it('creates, lists, renames and deletes programs', async () => {
+    const created = await app.request('/api/programs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'STLA' }),
+    })
+    expect(created.status).toBe(200)
+    const prog = (await created.json()) as any
+    expect(prog.name).toBe('STLA')
+    expect(existsSync(prog.folder)).toBe(true)
+
+    const list = (await (await app.request('/api/programs')).json()) as any[]
+    expect(list.map((p) => p.name)).toEqual(['STLA'])
+
+    await app.request(`/api/programs/${prog.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Stellantis' }),
+    })
+    expect(((await (await app.request('/api/programs')).json()) as any[])[0].name).toBe('Stellantis')
+
+    const del = await app.request(`/api/programs/${prog.id}`, { method: 'DELETE' })
+    expect(del.status).toBe(200)
+    expect((await (await app.request('/api/programs')).json())).toEqual([])
+  })
+
+  it('rejects a duplicate program name', async () => {
+    const headers = { 'Content-Type': 'application/json' }
+    const body = JSON.stringify({ name: 'STLA' })
+    await app.request('/api/programs', { method: 'POST', headers, body })
+    const dup = await app.request('/api/programs', { method: 'POST', headers, body })
+    expect(dup.status).toBe(409)
   })
 
   it('lists and fetches a test, 404ing for an unknown id', async () => {
@@ -98,7 +128,9 @@ describe('server', () => {
   })
 
   it('lists ingestion jobs and triggers a rescan', async () => {
-    writeFileSync(path.join(dir, 'watch', 'a_REPORT.pdf'), 'x')
+    const prog = db.createProgram('P', path.join(dir, 'watch', 'P'))
+    mkdirSync(prog.folder)
+    writeFileSync(path.join(prog.folder, 'a_REPORT.pdf'), 'x')
     const res = await app.request('/api/ingestion/rescan', { method: 'POST' })
     expect(res.status).toBe(200)
     const jobs = (await (await app.request('/api/ingestion')).json()) as any[]
