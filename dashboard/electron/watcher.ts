@@ -112,8 +112,17 @@ export class FolderWatcher {
 
     const jobsByStem = new Map(this.db.listJobs().map((job) => [job.stem, job]))
 
+    // Registered program folders (longest path first so nested matches win).
+    const programs = this.db.listPrograms()
+      .map((p) => ({ id: p.id as string, name: p.name as string, folder: path.resolve(p.folder as string) }))
+      .sort((a, b) => b.folder.length - a.folder.length)
+    const programFor = (filePath: string) =>
+      programs.find((p) => filePath === p.folder || filePath.startsWith(p.folder + path.sep)) ?? null
+
     for (const [stem, pair] of groups) {
       const { pdf, xlsm } = pair
+      const program = programFor(pdf ?? xlsm ?? '')
+      if (!program) continue // file is not under any registered program folder
       let pdfHash: string | null
       let xlsmHash: string | null
       try {
@@ -158,6 +167,8 @@ export class FolderWatcher {
 
       try {
         const test = await this.parsePair(pdf, xlsm)
+        test.program_id = program.id
+        test.project = program.name
         const existing = this.db.findIdentity(test, stem)
         let low = [...(test.lowConfidence ?? [])]
         if (existing) {

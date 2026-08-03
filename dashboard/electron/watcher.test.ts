@@ -31,7 +31,7 @@ describe('stemOf', () => {
 
 describe('FolderWatcher', () => {
   let dir: string, watch: string, db: Database, parse: Mock, watcher: FolderWatcher
-  let pdf: string, xlsm: string
+  let pdf: string, xlsm: string, programId: string, progFolder: string
 
   beforeEach(() => {
     dir = mkdtempSync(path.join(tmpdir(), 'emlab-w-'))
@@ -40,8 +40,13 @@ describe('FolderWatcher', () => {
     db = new Database(path.join(dir, 'test.db'))
     parse = vi.fn(async (_pdfPath: string, _xlsmPath: string) => parsedTest())
     watcher = new FolderWatcher({ watchFolder: watch, scanIntervalSeconds: 1 }, db, parse)
-    pdf = path.join(watch, 'FEV_SAMPLE_REPORT.pdf')
-    xlsm = path.join(watch, 'FEV_SAMPLE_TRACES.xlsm')
+    // Tests are ingested from a registered program's folder.
+    const prog = db.createProgram('STLA', path.join(watch, 'STLA'))
+    programId = prog.id
+    progFolder = prog.folder
+    mkdirSync(progFolder)
+    pdf = path.join(progFolder, 'FEV_SAMPLE_REPORT.pdf')
+    xlsm = path.join(progFolder, 'FEV_SAMPLE_TRACES.xlsm')
   })
   afterEach(() => {
     watcher.stop()
@@ -73,12 +78,30 @@ describe('FolderWatcher', () => {
   it('keeps same-day repeat runs distinct', async () => {
     for (const ts of ['09-51-01', '15-22-40']) {
       const stem = `CITROEN_AIRCROSS_MT_9740_5099_2026-03-18_${ts}`
-      writeFileSync(path.join(watch, `${stem}_REPORT.pdf`), `pdf-${ts}`)
-      writeFileSync(path.join(watch, `${stem}_TRACES.xlsm`), `xlsm-${ts}`)
+      writeFileSync(path.join(progFolder, `${stem}_REPORT.pdf`), `pdf-${ts}`)
+      writeFileSync(path.join(progFolder, `${stem}_TRACES.xlsm`), `xlsm-${ts}`)
     }
     await watcher.scanOnce()
     expect(db.listTests()).toHaveLength(2)
     expect(parse).toHaveBeenCalledTimes(2)
+  })
+
+  it('assigns the program from the folder a file was ingested from', async () => {
+    writeFileSync(pdf, 'pdf-v1')
+    writeFileSync(xlsm, 'xlsm-v1')
+    await watcher.scanOnce()
+    const tests = db.listTests()
+    expect(tests).toHaveLength(1)
+    expect(tests[0].program_id).toBe(programId)
+    expect(tests[0].project).toBe('STLA')
+  })
+
+  it('skips files not under any registered program folder', async () => {
+    const stem = 'LOOSE_2026-01-01_09-00-00'
+    writeFileSync(path.join(watch, `${stem}_REPORT.pdf`), 'p')
+    writeFileSync(path.join(watch, `${stem}_TRACES.xlsm`), 'x')
+    await watcher.scanOnce()
+    expect(db.listTests()).toHaveLength(0)
   })
 
   it('does not re-hash unchanged files', async () => {
