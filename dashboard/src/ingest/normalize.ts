@@ -22,14 +22,6 @@ export function parseFilename(stem: string): FilenameMeta {
   return { stem, model: null, transmissionToken: null, vn: null, date: d ? d[1] : null }
 }
 
-function classifyProject(model: string | null, vin: string | null): { project: string; guessed: boolean } {
-  const s = `${model ?? ''} ${vin ?? ''}`.toUpperCase()
-  if (/CITROEN|PEUGEOT|JEEP|FIAT|OPEL|STLA/.test(s)) return { project: 'STLA', guessed: false }
-  if (/HONDA/.test(s)) return { project: 'Honda', guessed: false }
-  if (/NISSAN|RENAULT|DATSUN|RNTBCI/.test(s)) return { project: 'RNTBCI', guessed: false }
-  return { project: 'STLA', guessed: true }
-}
-
 function classifyCycle(
   cycleUsed: string | null,
   distanceKm: number | null,
@@ -72,8 +64,8 @@ export function buildTest(
   const low = [...(report?.lowConfidence ?? [])]
   if (!report) low.push('results', 'metadata')
 
-  const proj = classifyProject(fn.model, report?.meta.vin ?? null)
-  if (proj.guessed) low.push('project')
+  // Program is assigned from the folder a report was ingested into (watcher /
+  // manual import), not guessed from the filename. Left empty here.
   const cyc = classifyCycle(report?.meta.cycleUsed ?? null, report?.meta.distanceKm ?? null)
   if (cyc.guessed) low.push('cycle')
   const config = classifyConfig(report?.meta.cycleUsed ?? null)
@@ -82,7 +74,7 @@ export function buildTest(
 
   const test: Test = {
     id: stem,
-    project: proj.project,
+    project: '',
     cycle: cyc.cycle,
     config,
     transmission,
