@@ -9,7 +9,7 @@ import type { Pollutant, Test } from '../model/types'
 import { api } from '../lib/api'
 import { useUnits } from '../store/useUnits'
 
-type SortKey = 'date' | 'project' | 'cycle' | 'config' | Pollutant
+type SortKey = 'date' | 'project' | 'cycle' | 'config' | 'iwr' | 'rmsse' | Pollutant
 
 export function MasterTable() {
   const tests = useLibrary((s) => s.tests)
@@ -22,6 +22,8 @@ export function MasterTable() {
   const rows = useMemo(() => {
     const filtered = applyFilters(tests, filters)
     const get = (t: Test): string | number => {
+      if (sort === 'iwr') return t.j2951?.indices?.iwr ?? Number.POSITIVE_INFINITY
+      if (sort === 'rmsse') return t.j2951?.indices?.rmsse ?? Number.POSITIVE_INFINITY
       if (ALL_POLL.includes(sort as Pollutant)) return t.results[sort as Pollutant] ?? -1
       return (t as unknown as Record<string, string>)[sort] ?? ''
     }
@@ -59,6 +61,8 @@ export function MasterTable() {
                 <Th>Trans</Th>
                 <Th>Lab</Th>
                 <Th align="right">ODO</Th>
+                <Th onClick={() => toggle('iwr')} active={sort === 'iwr'} dir={dir} align="right">IWR</Th>
+                <Th onClick={() => toggle('rmsse')} active={sort === 'rmsse'} dir={dir} align="right">RMSSE</Th>
                 {ALL_POLL.map((p) => (
                   <Th key={p} onClick={() => toggle(p)} active={sort === p} dir={dir} align="right">
                     {p}
@@ -67,7 +71,7 @@ export function MasterTable() {
                 <Th>Status</Th>
               </tr>
               <tr>
-                <td colSpan={6} />
+                <td colSpan={8} />
                 {ALL_POLL.map((p) => (
                   <td key={p} className="eyebrow" style={{ textAlign: 'right', padding: '0 10px 6px', fontSize: 8.5, color: 'var(--ink-faint)' }}>
                     {displayUnit(p, massUnit)}
@@ -92,6 +96,18 @@ export function MasterTable() {
                     <td style={td}>{t.transmission}</td>
                     <td style={td}>{t.lab}</td>
                     <td style={{ ...td, textAlign: 'right' }} className="font-mono">{t.odo ?? '—'}</td>
+                    <td style={{ ...td, textAlign: 'right' }} className="font-mono">
+                      {t.j2951?.indices ? (
+                        <span style={{ color: RAG_COLOR[t.j2951.verdict?.iwr ?? 'na'], fontWeight: t.j2951.verdict?.iwr && t.j2951.verdict.iwr !== 'pass' ? 700 : 400 }}>
+                          {t.j2951.indices.iwr >= 0 ? '+' : ''}{t.j2951.indices.iwr.toFixed(2)}
+                        </span>
+                      ) : <span style={{ color: 'var(--ink-faint)' }}>—</span>}
+                    </td>
+                    <td style={{ ...td, textAlign: 'right' }} className="font-mono">
+                      {t.j2951?.indices ? (
+                        <span style={{ color: RAG_COLOR[t.j2951.verdict?.rmsse ?? 'na'] }}>{t.j2951.indices.rmsse.toFixed(2)}</span>
+                      ) : <span style={{ color: 'var(--ink-faint)' }}>—</span>}
+                    </td>
                     {ALL_POLL.map((p) => (
                       <td key={p} style={{ ...td, textAlign: 'right' }} className="font-mono">
                         <span style={{ color: LIMITED.includes(p) ? RAG_COLOR[c.perPollutant[p].rag] : 'var(--ink-dim)' }}>
