@@ -8,7 +8,6 @@ import { Database } from '../electron/db.ts'
 import { FolderWatcher } from '../electron/watcher.ts'
 import { createServer } from '../electron/server.ts'
 import { backfillJ2951 } from '../electron/backfill.ts'
-import { loadOrPromptWatchFolder } from './userConfig.ts'
 import { createParsePairProcess } from './parsePairProcess.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -38,22 +37,13 @@ let resolvedApiBase = ''
 let apiToken = ''
 let resolvedAppUrl = ''
 
-async function pickWatchFolder(): Promise<string | null> {
-  const result = await dialog.showOpenDialog({
-    title: 'Choose the folder EMLAB should watch for FEV reports',
-    properties: ['openDirectory', 'createDirectory'],
-  })
-  if (result.canceled || result.filePaths.length === 0) return null
-  return result.filePaths[0]
-}
-
 async function start(): Promise<void> {
   const userDataDir = app.getPath('userData')
-  const watchFolder = await loadOrPromptWatchFolder(userDataDir, pickWatchFolder)
-  if (!watchFolder) {
-    app.quit()
-    return
-  }
+  // Programs live in subfolders of this root. Sensible default, no prompt; a
+  // future Settings screen can relocate it. Each program the user creates
+  // becomes a subfolder here (see electron/server.ts POST /api/programs).
+  const watchFolder = path.join(app.getPath('documents'), 'EMLAB')
+  fs.mkdirSync(watchFolder, { recursive: true })
 
   const settings = {
     watchFolder,
