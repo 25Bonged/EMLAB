@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { serve } from '@hono/node-server'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -93,7 +93,40 @@ function createWindow(): void {
       preload: path.join(HERE, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Explicit rather than relying on the default: this window renders text
+      // parsed out of third-party PDFs, so the renderer is treated as hostile.
+      sandbox: true,
+      webviewTag: false,
     },
+  })
+
+  // The renderer should only ever show our own loopback UI. Without these two
+  // guards, any navigation the page can trigger — a link built from parsed
+  // report text, a window.open — would load remote content inside a desktop
+  // app window. Both are denied; anything genuinely external goes to the
+  // user's real browser instead.
+  const isOwnOrigin = (target: string): boolean => {
+    try {
+      const u = new URL(target)
+      return (u.protocol === 'http:' || u.protocol === 'https:')
+        && (u.hostname === '127.0.0.1' || u.hostname === 'localhost')
+    } catch {
+      return false
+    }
+  }
+
+  mainWindow.webContents.on('will-navigate', (event, target) => {
+    if (!isOwnOrigin(target)) event.preventDefault()
+  })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isOwnOrigin(url)) return { action: 'allow' }
+    void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
   })
 
   // Load over the loopback HTTP server, NOT loadFile(). Vite emits absolute

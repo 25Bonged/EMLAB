@@ -135,6 +135,21 @@ export class Database {
     return rows.map((row) => ({ ...JSON.parse(row.data_json), status: row.status }))
   }
 
+  /**
+   * Same rows as listTests, with `trace` and `phases` removed *inside SQLite*
+   * so their JSON is never parsed in JS. The full data_json is ~580 KB per
+   * test, almost all of it trace; the list route only ever wanted the summary.
+   * Callers that need traces (backfill, getTest) must use listTests/getTest.
+   */
+  listTestSummaries(includeNonaccepted = true): Record<string, any>[] {
+    const where = includeNonaccepted ? 'WHERE active=1' : "WHERE active=1 AND status='accepted'"
+    const rows = this.db.prepare(
+      `SELECT json_remove(data_json,'$.trace','$.phases') AS data_json, status FROM tests ${where}
+       ORDER BY test_date DESC, updated_at DESC`,
+    ).all() as { data_json: string; status: string }[]
+    return rows.map((row) => ({ ...JSON.parse(row.data_json), trace: null, phases: [], status: row.status }))
+  }
+
   getTest(id: string): Record<string, any> | null {
     const row = this.db.prepare('SELECT data_json,status FROM tests WHERE id=?').get(id) as
       | { data_json: string; status: string } | undefined

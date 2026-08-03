@@ -115,3 +115,94 @@ describe('server', () => {
     expect(buf.length).toBeGreaterThan(0)
   })
 })
+
+describe('server security guards', () => {
+  let dir: string, db: Database, watcher: FolderWatcher, app: ReturnType<typeof createServer>
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'emlab-sec-'))
+    mkdirSync(path.join(dir, 'watch'))
+    db = new Database(path.join(dir, 'test.db'))
+    watcher = new FolderWatcher({ watchFolder: path.join(dir, 'watch'), scanIntervalSeconds: 1 }, db, async () => sampleTest())
+    app = createServer(db, watcher, {
+      watchFolder: path.join(dir, 'watch'), databasePath: path.join(dir, 'test.db'),
+      port: 0, scanIntervalSeconds: 1, dashboardDist: path.join(dir, 'nonexistent-dist'),
+    })
+  })
+  afterEach(() => {
+    watcher.stop()
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  const importBody = JSON.stringify({ tests: [sampleTest({ id: 'injected' })] })
+
+  // A cross-origin POST with Content-Type: text/plain is a "simple request":
+  // browsers send it with no preflight, so before this guard any page the user
+  // visited could inject rows and trigger rescans.
+  it('refuses a cross-origin mutating request', async () => {
+    const res = await app.request('/api/tests/import-parsed', {
+      method: 'POST',
+      headers: { host: '127.0.0.1:8000', origin: 'https://evil.example', 'content-type': 'text/plain' },
+      body: importBody,
+    })
+    expect(res.status).toBe(403)
+    expect(db.listTests()).toHaveLength(0)
+  })
+
+  it('refuses a cross-origin rescan', async () => {
+    const res = await app.request('/api/ingestion/rescan', {
+      method: 'POST',
+      headers: { host: '127.0.0.1:8000', origin: 'https://evil.example' },
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('allows a same-origin mutating request', async () => {
+    const res = await app.request('/api/tests/import-parsed', {
+      method: 'POST',
+      headers: { host: '127.0.0.1:8000', origin: 'http://127.0.0.1:8000', 'content-type': 'application/json' },
+      body: importBody,
+    })
+    expect(res.status).toBe(200)
+    expect(db.listTests()).toHaveLength(1)
+  })
+
+  // Non-browser clients (curl, these tests) send no Origin. They are not a
+  // CSRF vector, so they must keep working.
+  it('allows a mutating request with no Origin at all', async () => {
+    const res = await app.request('/api/tests/import-parsed', {
+      method: 'POST', headers: { host: 'localhost:8000' }, body: importBody,
+    })
+    expect(res.status).toBe(200)
+  })
+
+  // DNS rebinding: the attacker's domain resolves to 127.0.0.1, but the Host
+  // header still names it. Without this the whole confidential library is readable.
+  it('refuses a non-loopback Host even on a GET', async () => {
+    const res = await app.request('/api/tests', { headers: { host: 'evil.example' } })
+    expect(res.status).toBe(403)
+  })
+
+  it('accepts loopback Host spellings', async () => {
+    for (const host of ['127.0.0.1:8000', 'localhost:8000', 'localhost', '[::1]:8000']) {
+      const res = await app.request('/api/health', { headers: { host } })
+      expect(res.status, host).toBe(200)
+    }
+  })
+
+  it('marks API responses no-store and nosniff', async () => {
+    const res = await app.request('/api/tests', { headers: { host: '127.0.0.1:8000' } })
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+  })
+
+  it('omits traces from the summary listing but keeps them on detail', async () => {
+    const { testId } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+    const list = await (await app.request('/api/tests', { headers: { host: '127.0.0.1:8000' } })).json() as any[]
+    expect(list[0].trace).toBeNull()
+    expect(list[0].id).toBe(testId)
+    const detail = await (await app.request(`/api/tests/${testId}`, { headers: { host: '127.0.0.1:8000' } })).json() as any
+    expect(detail.trace.dilute).toHaveLength(1)
+  })
+})
