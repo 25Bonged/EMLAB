@@ -34,5 +34,6 @@ export function distinct<K extends keyof Test>(tests: Test[], key: K): string[] 
   return [...new Set(tests.map((t) => String(t[key])).filter((v) => v && v !== 'Unknown'))].sort()
 }
 
-export const PROJECT_ORDER = ['STLA', 'Honda', 'RNTBCI']
+// Programs are user-created (see usePrograms); nothing is seeded.
+export const PROJECT_ORDER: string[] = []
 export const CYCLE_ORDER = ['WLTP', 'MIDC', 'NEDC', 'Unknown']

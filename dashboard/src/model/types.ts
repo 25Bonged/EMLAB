@@ -54,6 +54,7 @@ export interface UnitMetadata {
 export interface Test {
   id: string // filename stem
   project: Project
+  program_id?: string // stable link to the owning program (folder)
   cycle: Cycle
   config: string // CC24 / CC22 / Unknown
   transmission: string // MB6 / AT6 / Unknown
