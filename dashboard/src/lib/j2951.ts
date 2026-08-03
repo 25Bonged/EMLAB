@@ -3,18 +3,40 @@ import type {
 } from '../model/types'
 
 /** Bump to force `electron/backfill.ts` to recompute the whole library. */
-export const CALC_VERSION = 1
+export const CALC_VERSION = 2
 
 /** AIS-175 Annex B2 §3.1 rotating-mass factor. */
 export const DEFAULT_KR = 1.03
 
 /**
- * Pass bands. IWR ±4.0 % and RMSSE ≤ 1.3 km/h come from the calculator sheet.
- * The 5.0 % marginal threshold is an INFERENCE — the workbook labels a
- * −4.038 % run MARGINAL but never states the cutoff. Isolated here so it is a
- * one-line correction if a cited source turns up.
+ * Accept/reject criteria from AIS-175 Annex B7 §7 (IWR / SAE J2951), as stated
+ * in CC24MB6_IWR_TestCell_SOP:
+ *
+ *   metric    legal band              target for FE runs   reject if
+ *   IWR       −2.0 % … +4.0 %         −2 % (low edge)      outside −2 … +4 %
+ *   RMSSE     < 1.3 km/h              < 1.0 km/h           > 1.3 km/h
+ *   distance  within ±1 % of target                        > +1.5 %
+ *
+ * "A run with IWR > +4 % or < −2 % is NOT a valid Type-I trace — re-drive it."
+ *
+ * The IWR band is ASYMMETRIC. An earlier version of this file used ±4.0 %,
+ * taken from the analyser workbook's uncited LIMITS note; that wrongly passed
+ * economical-but-illegal runs down to −4 %. Three separate documents
+ * (TestCell SOP, IWR one-pager, IWR deep dive) agree on −2.0 … +4.0 and cite
+ * the regulation, so that is what is enforced here.
+ *
+ * Distance has a genuine grey zone: legal is ±1 %, rejection starts past
+ * 1.5 %, so 1.0–1.5 % is flagged rather than failed.
  */
-export const BANDS = { iwrPass: 4.0, iwrWarn: 5.0, rmssePass: 1.3 } as const
+export const BANDS = {
+  iwrMin: -2.0,
+  iwrMax: 4.0,
+  rmssePass: 1.3,
+  /** Advisory target, not a limit — the SOP tells drivers to trim toward this. */
+  rmsseTarget: 1.0,
+  distancePass: 0.01,
+  distanceReject: 0.015,
+} as const
 
 /** Median of the sample intervals, used only by the sample-rate guard. */
 function median(xs: number[]): number {
@@ -131,10 +153,14 @@ function worse(a: RagLevel, b: RagLevel): RagLevel {
 }
 
 export function verdictFor(i: J2951Indices): J2951Verdict {
-  const mag = Math.abs(i.iwr)
-  const iwr: RagLevel = mag <= BANDS.iwrPass ? 'pass' : mag <= BANDS.iwrWarn ? 'warn' : 'fail'
+  // Binary by the SOP's own wording: outside the band the run is not a valid
+  // Type-I trace. No "marginal" tier is invented for IWR or RMSSE.
+  const iwr: RagLevel = i.iwr >= BANDS.iwrMin && i.iwr <= BANDS.iwrMax ? 'pass' : 'fail'
   const rmsse: RagLevel = i.rmsse <= BANDS.rmssePass ? 'pass' : 'fail'
-  return { iwr, rmsse, overall: worse(iwr, rmsse) }
+  const driftPct = i.distTargetKm > 0 ? Math.abs(i.distActualKm - i.distTargetKm) / i.distTargetKm : 0
+  const distance: RagLevel = driftPct <= BANDS.distancePass ? 'pass'
+    : driftPct <= BANDS.distanceReject ? 'warn' : 'fail'
+  return { iwr, rmsse, distance, overall: worse(worse(iwr, rmsse), distance) }
 }
 
 export interface ComputeJ2951Args {

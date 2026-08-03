@@ -125,8 +125,8 @@ function J2951Card({ test }: { test: Test }) {
         <div className="panel-heading"><div><Eyebrow>SAE J2951 · drive-trace fidelity</Eyebrow><h3>Drive quality</h3></div></div>
         {idx && verdict ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 0, padding: '4px 6px' }}>
-            <J2951Stat label="IWR" value={`${idx.iwr >= 0 ? '+' : ''}${idx.iwr.toFixed(2)}%`} color={RAG_COLOR[verdict.iwr]} caption="limit ±4.0 %" />
-            <J2951Stat label="RMSSE" value={`${idx.rmsse.toFixed(3)} km/h`} color={RAG_COLOR[verdict.rmsse]} caption="limit 1.3 km/h" />
+            <J2951Stat label="IWR" value={`${idx.iwr >= 0 ? '+' : ''}${idx.iwr.toFixed(2)}%`} color={RAG_COLOR[verdict.iwr]} caption="legal −2.0 … +4.0 %" />
+            <J2951Stat label="RMSSE" value={`${idx.rmsse.toFixed(3)} km/h`} color={RAG_COLOR[verdict.rmsse]} caption="limit 1.3 · aim < 1.0" />
             <J2951Stat
               label="Driven distance"
               value={`${idx.distActualKm.toFixed(3)} km`}

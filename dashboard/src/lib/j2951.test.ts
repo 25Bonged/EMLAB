@@ -86,34 +86,58 @@ describe('alignActual', () => {
   })
 })
 
-describe('verdictFor — pass bands (inferred, isolated in BANDS)', () => {
-  const idx = (iwr: number, rmsse: number) => ({
-    iwr, rmsse, dr: 1, er: 1, eer: 1, ascr: 1,
-    distTargetKm: 1, distActualKm: 1, iwTargetJkg: 1, iwActualJkg: 1,
+describe('verdictFor — AIS-175 Annex B7 §7 accept/reject rule', () => {
+  const idx = (iwr: number, rmsse: number, distActualKm = 15.012278, distTargetKm = 15.012278) => ({
+    iwr, rmsse, dr: distActualKm / distTargetKm, er: null, eer: null, ascr: 1,
+    distTargetKm, distActualKm, iwTargetJkg: 1, iwActualJkg: 1,
   })
 
-  it('passes within +/-4.0% IWR and <=1.3 km/h RMSSE', () => {
-    expect(verdictFor(idx(3.9, 1.2))).toEqual({ iwr: 'pass', rmsse: 'pass', overall: 'pass' })
-    expect(verdictFor(idx(-3.9, 1.3))).toEqual({ iwr: 'pass', rmsse: 'pass', overall: 'pass' })
+  // The band is asymmetric: -2.0 .. +4.0, NOT +/-4.0. This is the whole point
+  // of the correction -- an economical-but-illegal run at -3 % used to pass.
+  it('passes inside the legal band', () => {
+    expect(verdictFor(idx(-2.0, 1.2)).iwr).toBe('pass')
+    expect(verdictFor(idx(0, 1.2)).iwr).toBe('pass')
+    expect(verdictFor(idx(4.0, 1.3)).iwr).toBe('pass')
   })
 
-  it('marks IWR between 4.0 and 5.0 as warn (displayed MARGINAL)', () => {
-    expect(verdictFor(idx(-4.038, 1.0)).iwr).toBe('warn')
-    expect(verdictFor(idx(4.9, 1.0)).overall).toBe('warn')
+  it('fails below -2.0 %, the economy edge of the band', () => {
+    expect(verdictFor(idx(-2.01, 1.0)).iwr).toBe('fail')
+    expect(verdictFor(idx(-2.65, 1.0)).iwr).toBe('fail')
+    expect(verdictFor(idx(-4.038, 1.0)).iwr).toBe('fail')
   })
 
-  it('fails beyond 5.0% IWR or above 1.3 km/h RMSSE', () => {
-    expect(verdictFor(idx(5.1, 1.0)).iwr).toBe('fail')
+  it('fails above +4.0 %', () => {
+    expect(verdictFor(idx(4.01, 1.0)).iwr).toBe('fail')
+    expect(verdictFor(idx(5.2635, 1.0)).iwr).toBe('fail')
+  })
+
+  it('fails RMSSE above 1.3 km/h', () => {
+    expect(verdictFor(idx(0, 1.3)).rmsse).toBe('pass')
     expect(verdictFor(idx(0, 1.31)).rmsse).toBe('fail')
-    expect(verdictFor(idx(0, 1.31)).overall).toBe('fail')
   })
 
-  it('takes overall as the worse of the two', () => {
-    expect(verdictFor(idx(4.5, 1.4)).overall).toBe('fail')
+  // Distance is the one criterion with a genuine grey zone in the SOP:
+  // legal within +/-1 %, rejection past 1.5 %.
+  it('bands distance drift: <=1 % pass, <=1.5 % warn, beyond fail', () => {
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.005)).distance).toBe('pass')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.012)).distance).toBe('warn')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.02)).distance).toBe('fail')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 0.98)).distance).toBe('fail')
   })
 
-  it('exposes the bands as a single editable constant', () => {
-    expect(BANDS).toEqual({ iwrPass: 4.0, iwrWarn: 5.0, rmssePass: 1.3 })
+  it('overall is the worst of the three', () => {
+    expect(verdictFor(idx(0, 1.0)).overall).toBe('pass')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.012)).overall).toBe('warn')
+    expect(verdictFor(idx(0, 1.4)).overall).toBe('fail')
+    expect(verdictFor(idx(-3, 1.0)).overall).toBe('fail')
+  })
+
+  it('keeps the cited thresholds in one place', () => {
+    expect(BANDS.iwrMin).toBe(-2.0)
+    expect(BANDS.iwrMax).toBe(4.0)
+    expect(BANDS.rmssePass).toBe(1.3)
+    expect(BANDS.distancePass).toBe(0.01)
+    expect(BANDS.distanceReject).toBe(0.015)
   })
 })
 
@@ -130,7 +154,13 @@ describe('computeJ2951 guards — each yields a distinct reason code, never a pl
     expect(r.scheduleId).toBe('WLTC_3B_LMH')
     expect(r.sampleRateHz).toBe(1)
     expect(r.indices!.iwr).toBeCloseTo(EXP.iwr, 6)
-    expect(r.verdict!.overall).toBe('pass')
+    // IWR is -2.985 %, below the -2.0 % legal floor, so this run is NOT a
+    // valid Type-I trace. It passed under the old symmetric +/-4.0 band --
+    // that band was wrong. See BANDS in j2951.ts.
+    expect(r.verdict!.iwr).toBe('fail')
+    expect(r.verdict!.rmsse).toBe('pass')
+    expect(r.verdict!.distance).toBe('pass')
+    expect(r.verdict!.overall).toBe('fail')
     expect(r.inputs).toEqual({ massKg: K.massKg, f0: K.f0, f1: K.f1, f2: K.f2, kr: 1.03, source: 'parsed' })
   })
 
@@ -168,6 +198,7 @@ describe('computeJ2951 guards — each yields a distinct reason code, never a pl
     expect(r.indices!.iwr).toBeCloseTo(EXP.iwr, 6)
     expect(r.indices!.er).toBeNull()
     expect(r.indices!.eer).toBeNull()
-    expect(r.verdict!.overall).toBe('pass')
+    // Same run, so same verdict: -2.985 % IWR is outside -2.0 .. +4.0.
+    expect(r.verdict!.overall).toBe('fail')
   })
 })

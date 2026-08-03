@@ -380,7 +380,15 @@ function DriveQuality({ rows }: { rows: ReturnType<typeof applyFilters> }) {
             </tbody>
           </table>
         </div>
-        <div className="analysis-note">Indices come from chassis-dyno roll speed at native 1 Hz — the regulatory reference. IWR is a one-sided sum of positive kinetic-energy increments, so it is highly sensitive to signal ripple; a trace sampled at any other rate is refused rather than scored. MARGINAL means |IWR| is between 4.0 % and 5.0 %.</div>
+        <div className="analysis-note">
+          Accept/reject per AIS-175 Annex B7 §7 (SAE J2951): IWR must fall in <strong>−2.0 … +4.0 %</strong>{' '}
+          — the band is asymmetric, and a run outside it is not a valid Type-I trace and should be
+          re-driven. RMSSE ≤ 1.3 km/h (aim below 1.0). Driven distance within ±1 % of the schedule;
+          1.0–1.5 % is flagged, beyond that rejected. Indices come from chassis-dyno roll speed at
+          native 1 Hz — the regulatory reference. IWR is a one-sided sum of positive kinetic-energy
+          increments, so it is highly sensitive to signal ripple; a trace at any other rate is refused
+          rather than scored.
+        </div>
       </Panel>
 
       {scoredRows.length > 0 && (

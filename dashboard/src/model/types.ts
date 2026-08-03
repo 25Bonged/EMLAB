@@ -122,6 +122,8 @@ export type J2951Unavailable = 'no_trace' | 'no_schedule' | 'sample_rate' | 'len
 export interface J2951Verdict {
   iwr: RagLevel
   rmsse: RagLevel
+  /** Driven distance vs the schedule: ±1 % legal, rejection past 1.5 %. */
+  distance: RagLevel
   overall: RagLevel
 }
 
