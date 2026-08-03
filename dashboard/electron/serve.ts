@@ -4,9 +4,14 @@ import { Database } from './db.ts'
 import { FolderWatcher } from './watcher.ts'
 import { createServer } from './server.ts'
 import { parsePair } from './parsePair.ts'
+import { backfillJ2951 } from './backfill.ts'
 
 const settings = loadSettings()
 const db = new Database(settings.databasePath)
+
+const backfilled = backfillJ2951(db)
+if (backfilled > 0) console.log(`J2951: backfilled ${backfilled} test(s)`)
+
 const watcher = new FolderWatcher(settings, db, parsePair)
 const app = createServer(db, watcher, settings)
 

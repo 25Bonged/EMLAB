@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { Database } from '../electron/db.ts'
 import { FolderWatcher } from '../electron/watcher.ts'
 import { createServer } from '../electron/server.ts'
+import { backfillJ2951 } from '../electron/backfill.ts'
 import { loadOrPromptWatchFolder } from './userConfig.ts'
 import { createParsePairProcess } from './parsePairProcess.ts'
 
@@ -61,6 +62,10 @@ async function start(): Promise<void> {
   }
 
   const db = new Database(settings.databasePath)
+
+  const backfilled = backfillJ2951(db)
+  if (backfilled > 0) console.log(`J2951: backfilled ${backfilled} test(s)`)
+
   const { parsePair, dispose: disposeParser } = createParsePairProcess()
   const watcher = new FolderWatcher(settings, db, parsePair)
   const honoApp = createServer(db, watcher, settings)
