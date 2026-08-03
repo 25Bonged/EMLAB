@@ -1078,7 +1078,8 @@ input::placeholder {
 .sb-switcher svg {
   transition: transform 0.25s ease;
 }
-/* reveal rename/delete on hover, hiding the count to make room */
-.sb-program-row:hover .sb-actions { display: flex !important; }
-.sb-program-row:hover .sb-count { display: none; }
+/* rename/delete stay visible (subtle), brightening on row hover */
+.sb-actions { opacity: 0.4; transition: opacity 0.15s ease; }
+.sb-program-row:hover .sb-actions { opacity: 1; }
 .sb-program-row:hover { background: var(--aubergine-wash); }
+.sb-actions button:hover { color: var(--aubergine) !important; }

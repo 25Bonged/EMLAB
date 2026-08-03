@@ -101,7 +101,7 @@ export function Sidebar() {
               <span className="font-mono sb-count" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-faint)' }}>
                 {p.count || '—'}
               </span>
-              <span className="sb-actions" style={{ display: 'none', gap: 2, marginLeft: 6 }}>
+              <span className="sb-actions" style={{ display: 'flex', gap: 2, marginLeft: 6 }}>
                 <button
                   title="Rename program"
                   onClick={(e) => { e.stopPropagation(); setDialog({ mode: 'rename', id: p.id, name: p.name }) }}
@@ -145,7 +145,8 @@ export function Sidebar() {
 }
 
 const iconBtn: React.CSSProperties = {
-  border: 'none', background: 'none', cursor: 'pointer', color: 'var(--ink-faint)', fontSize: 12, padding: '0 2px',
+  border: 'none', background: 'none', cursor: 'pointer', color: 'var(--ink-faint)', fontSize: 12,
+  padding: '2px 4px', borderRadius: 6, lineHeight: 1,
 }
 
 function CycleGroup({
