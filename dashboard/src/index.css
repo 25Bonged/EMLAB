@@ -1037,3 +1037,44 @@ input::placeholder {
   color: var(--ink-dim) !important;
   font-family: 'Inter', sans-serif;
 }
+
+/* ── Programs sidebar: antd-style tree guide lines ── */
+.sb-children {
+  position: relative;
+  margin-left: 17px;
+}
+/* vertical connector running down through the children */
+.sb-children::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 16px;
+  width: 1px;
+  background: var(--line-bright);
+}
+/* a row that hangs off a connector line gets a horizontal tick */
+.sb-branch {
+  position: relative;
+}
+.sb-branch::before {
+  content: '';
+  position: absolute;
+  left: -17px;
+  top: 50%;
+  width: 13px;
+  height: 1px;
+  background: var(--line-bright);
+}
+.sb-switcher {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--ink-faint);
+}
+.sb-switcher svg {
+  transition: transform 0.25s ease;
+}
