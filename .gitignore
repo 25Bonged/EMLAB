@@ -16,7 +16,11 @@ OneDrive_*/
 *.xlsm
 STLA_Emission_Result_Compile.xlsx
 backend/data/
+dashboard/data/
 **/emissions.db
+# SQLite writes -wal/-shm sidecars alongside the db. They carry the same
+# confidential rows, and a hyphen is not matched by `emissions.db.*`.
+**/emissions.db-*
 **/emissions.db.*
 outputs/
 .workbook_inspection/
