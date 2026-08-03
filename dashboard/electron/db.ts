@@ -36,6 +36,12 @@ export class Database {
     this.db = new DatabaseSync(databasePath)
     this.db.exec(SCHEMA)
     this.db.exec('PRAGMA foreign_keys=ON')
+    // CREATE TABLE IF NOT EXISTS never alters an existing tests table, so a DB
+    // created before programs existed lacks program_id. Add it in place.
+    const cols = this.db.prepare('PRAGMA table_info(tests)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'program_id')) {
+      this.db.exec('ALTER TABLE tests ADD COLUMN program_id TEXT')
+    }
   }
 
   close(): void {

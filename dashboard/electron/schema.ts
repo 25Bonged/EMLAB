@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS tests (
   identity_key TEXT NOT NULL UNIQUE,
   active INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL CHECK(status IN ('pending_pair','processing','quarantined','accepted','replaced')),
-  project TEXT, cycle TEXT, config TEXT, transmission TEXT, lab TEXT,
+  project TEXT, program_id TEXT, cycle TEXT, config TEXT, transmission TEXT, lab TEXT,
   vehicle_model TEXT, vn_no TEXT, vin_sample_id TEXT, test_date TEXT,
   catalyst_state TEXT, odo REAL, imported_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   parser_version TEXT NOT NULL, data_json TEXT NOT NULL, low_confidence_json TEXT NOT NULL,
@@ -52,6 +52,13 @@ CREATE TABLE IF NOT EXISTS manual_overrides (
   id INTEGER PRIMARY KEY AUTOINCREMENT, test_id TEXT NOT NULL REFERENCES tests(id) ON DELETE CASCADE,
   patch_json TEXT NOT NULL, changed_at TEXT NOT NULL, changed_by TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS programs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  folder TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tests_program ON tests(program_id);
 `
 
 export const POLLUTANT_UNITS: Record<string, string> = {
