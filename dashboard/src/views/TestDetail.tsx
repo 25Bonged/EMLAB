@@ -7,7 +7,7 @@ import { useNav } from '../store/useNav'
 import { Panel, Eyebrow, RagBadge, RagDot, Chip } from '../components/common'
 import { ALL_POLL, LIMITED, compliance } from '../lib/derive'
 import { NORM, TARGET, displayUnit, fmt, rag, RAG_COLOR, TRACE_UNIT } from '../model/limits'
-import type { Pollutant, Test } from '../model/types'
+import type { J2951Unavailable, Pollutant, Test } from '../model/types'
 import { api } from '../lib/api'
 import { useUnits } from '../store/useUnits'
 import { coldStart, catalystLightoff, cycleMetrics, reconcile, type TraceChannel as LOChannel } from '../lib/engineering'
@@ -93,6 +93,8 @@ export function TestDetail() {
         {ALL_POLL.map((p) => <ResultCell key={p} test={t} p={p} massUnit={massUnit} />)}
       </div>
 
+      <J2951Card test={t} />
+
       {t.phases.length > 1 && <ColdStartPanel test={t} massUnit={massUnit} />}
 
       {t.phases.length > 0 && <PhaseTable test={t} massUnit={massUnit} />}
@@ -100,6 +102,59 @@ export function TestDetail() {
       {t.trace && <QAPanel test={t} massUnit={massUnit} />}
 
       {t.trace && <TraceSection test={t} />}
+    </div>
+  )
+}
+
+const J2951_UNAVAILABLE_NOTE: Record<J2951Unavailable, string> = {
+  no_trace: 'No speed trace was captured for this test, so drive-trace indices could not be computed.',
+  no_schedule: 'This cycle has no reference speed schedule, so drive-trace indices could not be computed.',
+  sample_rate: 'The speed trace is not sampled at 1 Hz and was refused rather than scored.',
+  length_mismatch: 'The speed trace length does not match the reference schedule, so indices could not be computed.',
+}
+
+function J2951Card({ test }: { test: Test }) {
+  const result = test.j2951
+  if (!result) return null
+  const idx = result.indices
+  const verdict = result.verdict
+  return (
+    <>
+      <div style={{ height: 16 }} />
+      <Panel ticks={false}>
+        <div className="panel-heading"><div><Eyebrow>SAE J2951 · drive-trace fidelity</Eyebrow><h3>Drive quality</h3></div></div>
+        {idx && verdict ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 0, padding: '4px 6px' }}>
+            <J2951Stat label="IWR" value={`${idx.iwr >= 0 ? '+' : ''}${idx.iwr.toFixed(2)}%`} color={RAG_COLOR[verdict.iwr]} caption="limit ±4.0 %" />
+            <J2951Stat label="RMSSE" value={`${idx.rmsse.toFixed(3)} km/h`} color={RAG_COLOR[verdict.rmsse]} caption="limit 1.3 km/h" />
+            <J2951Stat
+              label="Driven distance"
+              value={`${idx.distActualKm.toFixed(3)} km`}
+              caption={`${result.scheduleId ?? '—'} · ${result.sampleRateHz != null ? `${result.sampleRateHz.toFixed(2)} Hz` : '—'}`}
+            />
+            <J2951Stat
+              label="Target distance"
+              value={`${idx.distTargetKm.toFixed(3)} km`}
+              caption={`${result.scheduleId ?? '—'} · ${result.sampleRateHz != null ? `${result.sampleRateHz.toFixed(2)} Hz` : '—'}`}
+            />
+          </div>
+        ) : (
+          <div className="analysis-note">
+            {result.unavailable ? J2951_UNAVAILABLE_NOTE[result.unavailable] : 'J2951 drive-trace indices are not available for this test.'}
+            {result.detail ? ` — ${result.detail}` : ''}
+          </div>
+        )}
+      </Panel>
+    </>
+  )
+}
+
+function J2951Stat({ label, value, caption, color }: { label: string; value: string; caption: string; color?: string }) {
+  return (
+    <div style={{ padding: '12px 14px' }}>
+      <div className="eyebrow">{label}</div>
+      <div className="font-mono" style={{ fontSize: 16, fontWeight: 600, marginTop: 5, color: color ?? 'var(--ink)' }}>{value}</div>
+      <div style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 3 }}>{caption}</div>
     </div>
   )
 }
