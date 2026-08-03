@@ -30,13 +30,36 @@ export function scheduleIdForCycle(cycle: Cycle): ScheduleId | null {
   return cycle === 'WLTP' ? 'WLTC_3B_LMH' : null
 }
 
+export interface SchedulePhase {
+  name: string
+  /** Half-open [startS, endS) in seconds, matching the reference script's
+   *  mask `(g >= a) & (g < b)` in data/iwr1.py. */
+  startS: number
+  endS: number
+}
+
+/** WLTC 3b phase split, verbatim from data/iwr1.py:
+ *  PH=[('Low',0,589),('Medium',589,1022),('High',1022,1477)] */
+const PHASES: Record<ScheduleId, SchedulePhase[]> = {
+  WLTC_3B_LMH: [
+    { name: 'Low', startS: 0, endS: 589 },
+    { name: 'Medium', startS: 589, endS: 1022 },
+    { name: 'High', startS: 1022, endS: 1477 },
+  ],
+}
+
+export function phasesFor(id: ScheduleId): SchedulePhase[] {
+  return PHASES[id]
+}
+
 export interface Schedule {
   id: ScheduleId
   speeds: Float64Array
+  phases: SchedulePhase[]
 }
 
 /** Convenience: resolve a cycle straight to its trace, or null. */
 export function getSchedule(cycle: Cycle): Schedule | null {
   const id = scheduleIdForCycle(cycle)
-  return id ? { id, speeds: getScheduleById(id) } : null
+  return id ? { id, speeds: getScheduleById(id), phases: PHASES[id] } : null
 }

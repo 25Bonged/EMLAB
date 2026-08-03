@@ -95,6 +95,11 @@ export type IngestionStatus = 'pending_pair' | 'processing' | 'quarantined' | 'a
 
 /* ---------------------------- SAE J2951 drive trace ---------------------------- */
 
+export interface J2951PhaseIwr {
+  name: string
+  iwr: number
+}
+
 export interface J2951Indices {
   iwr: number // %
   rmsse: number // km/h
@@ -106,6 +111,9 @@ export interface J2951Indices {
   distActualKm: number
   iwTargetJkg: number
   iwActualJkg: number
+  /** IWR restricted to each cycle phase — localises where the excess
+   *  kinetic work was generated. Empty when the schedule defines no phases. */
+  phaseIwr: J2951PhaseIwr[]
 }
 
 export interface J2951Inputs {

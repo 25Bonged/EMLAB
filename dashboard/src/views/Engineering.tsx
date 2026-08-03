@@ -404,6 +404,29 @@ function DriveQuality({ rows }: { rows: ReturnType<typeof applyFilters> }) {
                 {selected?.j2951?.scheduleId ?? '—'} · {selected?.j2951?.sampleRateHz != null ? `${selected.j2951.sampleRateHz.toFixed(2)} Hz` : '—'} · road load {selected?.j2951?.inputs?.source ?? 'unavailable'}
               </span>
             </div>
+            {(selected?.j2951?.indices?.phaseIwr?.length ?? 0) > 0 && (
+              <div style={{ display: 'flex', gap: 26, padding: '12px 16px 0', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div>
+                  <div className="eyebrow">IWR whole cycle</div>
+                  <div className="font-mono" style={{ fontSize: 17, fontWeight: 700, color: RAG_COLOR[selected!.j2951!.verdict!.iwr] }}>
+                    {selected!.j2951!.indices!.iwr >= 0 ? '+' : ''}{selected!.j2951!.indices!.iwr.toFixed(2)} %
+                  </div>
+                </div>
+                {(selected!.j2951!.indices!.phaseIwr ?? []).map((ph) => (
+                  <div key={ph.name}>
+                    <div className="eyebrow">IWR {ph.name}</div>
+                    <div className="font-mono" style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink-dim)' }}>
+                      {ph.iwr >= 0 ? '+' : ''}{ph.iwr.toFixed(2)} %
+                    </div>
+                  </div>
+                ))}
+                <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', maxWidth: 330, lineHeight: 1.45 }}>
+                  Localises where the excess kinetic work was built. Each phase is
+                  its own ratio against that phase's target work, so they do not
+                  average to the whole-cycle value.
+                </div>
+              </div>
+            )}
             <div style={{ height: 280, padding: 16 }}>
               {!chartData ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-faint)', fontSize: 13 }}>Loading trace…</div>

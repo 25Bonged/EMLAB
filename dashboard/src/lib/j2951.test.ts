@@ -89,7 +89,7 @@ describe('alignActual', () => {
 describe('verdictFor — AIS-175 Annex B7 §7 accept/reject rule', () => {
   const idx = (iwr: number, rmsse: number, distActualKm = 15.012278, distTargetKm = 15.012278) => ({
     iwr, rmsse, dr: distActualKm / distTargetKm, er: null, eer: null, ascr: 1,
-    distTargetKm, distActualKm, iwTargetJkg: 1, iwActualJkg: 1,
+    distTargetKm, distActualKm, iwTargetJkg: 1, iwActualJkg: 1, phaseIwr: [],
   })
 
   // The band is asymmetric: -2.0 .. +4.0, NOT +/-4.0. This is the whole point
@@ -200,5 +200,54 @@ describe('computeJ2951 guards — each yields a distinct reason code, never a pl
     expect(r.indices!.eer).toBeNull()
     // Same run, so same verdict: -2.985 % IWR is outside -2.0 .. +4.0.
     expect(r.verdict!.overall).toBe('fail')
+  })
+})
+
+describe('per-phase IWR — matches data/iwr1.py', () => {
+  // Reference convention, verbatim from data/iwr1.py:
+  //   PH=[('Low',0,589),('Medium',589,1022),('High',1022,1477)]
+  //   m=(g>=a)&(g<b);  IWvec(v[m]) -> positive KE increments *within* the slice
+  // Diffing the slice means the step across a phase boundary belongs to
+  // neither phase. The expected values below were produced by running that
+  // exact script convention over this fixture.
+  const PHASES = [
+    { name: 'Low', startS: 0, endS: 589 },
+    { name: 'Medium', startS: 589, endS: 1022 },
+    { name: 'High', startS: 1022, endS: 1477 },
+  ]
+  const r = computeIndices(target, actual, { ...opts, phases: PHASES })
+
+  it('splits into Low / Medium / High', () => {
+    expect(r.phaseIwr.map((p) => p.name)).toEqual(['Low', 'Medium', 'High'])
+  })
+
+  it('reproduces the reference per-phase values', () => {
+    expect(r.phaseIwr[0].iwr).toBeCloseTo(-5.9492777404, 8)
+    expect(r.phaseIwr[1].iwr).toBeCloseTo(-3.6298169873, 8)
+    expect(r.phaseIwr[2].iwr).toBeCloseTo(-0.3744887196, 8)
+  })
+
+  it('does not average to the whole-cycle IWR — each phase is its own ratio', () => {
+    // Phase IWRs are ratios against different denominators, so the unweighted
+    // mean (-3.318) is not the whole-cycle value (-2.985). Asserted so nobody
+    // "simplifies" the per-phase pass into an average of the whole.
+    const meanOfPhases = r.phaseIwr.reduce((a, p) => a + p.iwr, 0) / 3
+    expect(meanOfPhases).toBeCloseTo(-3.3178611506, 6)
+    expect(Math.abs(meanOfPhases - r.iwr)).toBeGreaterThan(0.3)
+  })
+
+  it('is empty when no phases are supplied', () => {
+    expect(computeIndices(target, actual, opts).phaseIwr).toEqual([])
+  })
+
+  it('a perfectly driven trace is 0 % in every phase', () => {
+    const perfect = computeIndices(target, target, { ...opts, phases: PHASES })
+    for (const p of perfect.phaseIwr) expect(p.iwr).toBeCloseTo(0, 9)
+  })
+
+  it('skips a phase whose target does no positive work', () => {
+    const flat = new Array(120).fill(0)
+    const out = computeIndices(flat, flat, { ...opts, phases: [{ name: 'Idle', startS: 0, endS: 100 }] })
+    expect(out.phaseIwr).toEqual([])
   })
 })

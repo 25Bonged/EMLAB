@@ -46,5 +46,6 @@ export function resultForTest(test: Test): J2951Result {
     vehicleRld,
     inputSource,
     times,
+    phases: schedule?.phases,
   })
 }

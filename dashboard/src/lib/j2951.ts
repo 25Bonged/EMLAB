@@ -3,7 +3,7 @@ import type {
 } from '../model/types'
 
 /** Bump to force `electron/backfill.ts` to recompute the whole library. */
-export const CALC_VERSION = 2
+export const CALC_VERSION = 3
 
 /** AIS-175 Annex B2 §3.1 rotating-mass factor. */
 export const DEFAULT_KR = 1.03
@@ -45,6 +45,13 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
+export interface J2951Phase {
+  name: string
+  /** Half-open [startS, endS) in seconds. */
+  startS: number
+  endS: number
+}
+
 export interface J2951Options {
   dt: number
   massKg: number | null
@@ -52,6 +59,8 @@ export interface J2951Options {
   f1: number | null
   f2: number | null
   kr?: number
+  /** Cycle phases for the per-phase IWR breakdown. Omit for whole-cycle only. */
+  phases?: readonly J2951Phase[]
 }
 
 /** Σ of positive kinetic-energy increments, J/kg. One-sided by definition. */
@@ -125,6 +134,22 @@ export function computeIndices(
 
   const ascr = absSpeedChange(actual) / absSpeedChange(target)
 
+  // Per-phase IWR, matching data/iwr1.py: mask the grid with (t >= a) & (t < b),
+  // then take positive KE increments *within* the slice. Diffing the slice
+  // means the step across a phase boundary belongs to neither phase — that is
+  // the reference script's behaviour and the numbers depend on it.
+  const phaseIwr: { name: string; iwr: number }[] = []
+  for (const ph of o.phases ?? []) {
+    const lo = Math.max(0, Math.round(ph.startS / dt))
+    const hi = Math.min(target.length, Math.round(ph.endS / dt))
+    if (hi - lo < 2) continue
+    const t = target.slice(lo, hi)
+    const a = actual.slice(lo, hi)
+    const iwT = inertialWork(t)
+    if (iwT <= 0) continue
+    phaseIwr.push({ name: ph.name, iwr: (100 * (inertialWork(a) - iwT)) / iwT })
+  }
+
   const hasLoad = o.f0 != null && o.f1 != null && o.f2 != null && o.massKg != null
   let er: number | null = null
   let eer: number | null = null
@@ -135,7 +160,9 @@ export function computeIndices(
     eer = dr / er
   }
 
-  return { iwr, rmsse, dr, er, eer, ascr, distTargetKm, distActualKm, iwTargetJkg, iwActualJkg }
+  return {
+    iwr, rmsse, dr, er, eer, ascr, distTargetKm, distActualKm, iwTargetJkg, iwActualJkg, phaseIwr,
+  }
 }
 
 /**
@@ -177,6 +204,8 @@ export interface ComputeJ2951Args {
   inputSource?: J2951Inputs['source']
   /** Raw sample times; when given, dt is re-derived from their median interval. */
   times?: readonly number[]
+  /** Cycle phases, for the per-phase IWR breakdown. */
+  phases?: readonly J2951Phase[]
 }
 
 function unavailable(
@@ -224,7 +253,7 @@ export function computeJ2951(args: ComputeJ2951Args): J2951Result {
 
   const kr = DEFAULT_KR
   const indices = computeIndices(target, aligned, {
-    dt, massKg, f0: vehicleRld.A, f1: vehicleRld.B, f2: vehicleRld.C, kr,
+    dt, massKg, f0: vehicleRld.A, f1: vehicleRld.B, f2: vehicleRld.C, kr, phases: args.phases,
   })
 
   const hasLoad = vehicleRld.A != null && vehicleRld.B != null && vehicleRld.C != null && massKg != null
