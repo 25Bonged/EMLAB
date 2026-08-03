@@ -1188,12 +1188,22 @@ Expected: PASS, 2 tests.
 
 Run: `cd dashboard && npm test`
 
-Expected: all tests pass. If `compilationWorkbook.ts` also constructs `Test` objects, TypeScript will flag the missing `vehicleRld` — add `vehicleRld: { A: null, B: null, C: null }` there too.
+Expected: all tests pass.
+
+Two other files construct `Test` objects and will fail the typecheck until they
+supply the now-required `vehicleRld`. Task 2's typecheck confirmed exactly which:
+
+- `dashboard/src/ingest/compilationWorkbook.ts:104` — add
+  `vehicleRld: { A: null, B: null, C: null },` to the object it builds.
+- `dashboard/src/lib/engineering.test.ts:7` — its `Partial<Test>` fixture helper
+  needs the same field.
+
+Run `cd dashboard && npx tsc -b --noEmit` and confirm it is now clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add dashboard/src/ingest/normalize.ts dashboard/src/ingest/normalize.test.ts dashboard/src/ingest/compilationWorkbook.ts
+git add dashboard/src/ingest/normalize.ts dashboard/src/ingest/normalize.test.ts dashboard/src/ingest/compilationWorkbook.ts dashboard/src/lib/engineering.test.ts
 git commit -m "feat: compute J2951 indices during ingest"
 ```
 
