@@ -1,5 +1,7 @@
 import type { Cycle } from './types'
-import { WLTC_3B_LMH_CSV } from './wltc3b'
+// Explicit .ts extension — reached from the Electron backend, which runs under
+// --experimental-strip-types and cannot resolve extensionless specifiers.
+import { WLTC_3B_LMH_CSV } from './wltc3b.ts'
 
 /**
  * Registry of 1 Hz target speed traces, keyed by schedule id.

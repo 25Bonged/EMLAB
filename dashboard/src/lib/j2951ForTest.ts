@@ -1,6 +1,10 @@
 import type { Test, J2951Result, J2951Inputs } from '../model/types'
-import { computeJ2951 } from './j2951'
-import { getSchedule } from '../model/cycles'
+// Runtime imports carry explicit .ts extensions: this module is reached from
+// electron/db.ts, which runs under Node's --experimental-strip-types loader.
+// That loader does not do extensionless resolution, so omitting them breaks
+// the backend at startup while Vite and Vitest still resolve it happily.
+import { computeJ2951 } from './j2951.ts'
+import { getSchedule } from '../model/cycles.ts'
 
 type VehicleRld = { A: number | null; B: number | null; C: number | null }
 

@@ -1,6 +1,8 @@
 import type { Test, TraceRecord } from '../model/types'
 import type { ParsedReport } from './pdfReport'
-import { resultForTest } from '../lib/j2951ForTest'
+// Explicit .ts extension — reached from electron/parsePair.ts under Node's
+// --experimental-strip-types loader, which has no extensionless resolution.
+import { resultForTest } from '../lib/j2951ForTest.ts'
 
 export interface FilenameMeta {
   stem: string
