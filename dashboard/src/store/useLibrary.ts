@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Test } from '../model/types'
 import type { IngestProgress } from '../ingest/ingest'
 import { api, type Health, type IngestionJob } from '../lib/api'
+import { useNav } from './useNav'
 
 export interface Filters {
   project?: string
@@ -98,7 +99,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       // out of the main bundle.
       const { ingestFiles } = await import('../ingest/ingest')
       const parsed = await ingestFiles(files, (progress) => set({ progress }))
-      const result = await api.importParsed(parsed)
+      const result = await api.importParsed(parsed, useNav.getState().selectedProgram)
       set({ ...(await fetchState()), loading: false, progress: null })
       return result.count
     } catch (error) {
