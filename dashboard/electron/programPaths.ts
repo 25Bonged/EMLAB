@@ -11,6 +11,10 @@ const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
 export function sanitizeFolderName(name: string): string {
   const cleaned = name
     .trim()
+    // Matching control chars is the point: they must be stripped from a name
+    // that becomes a path segment, or a crafted name can smuggle them onto
+    // the filesystem. Hence the rule is disabled for this line only.
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*.\s\x00-\x1f-]+/g, '_')
     .replace(/^_+|_+$/g, '')
   if (!cleaned || RESERVED.test(cleaned)) return 'program'

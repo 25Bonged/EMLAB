@@ -1078,8 +1078,48 @@ input::placeholder {
 .sb-switcher svg {
   transition: transform 0.25s ease;
 }
-/* rename/delete stay visible (subtle), brightening on row hover */
-.sb-actions { opacity: 0.4; transition: opacity 0.15s ease; }
-.sb-program-row:hover .sb-actions { opacity: 1; }
-.sb-program-row:hover { background: var(--aubergine-wash); }
-.sb-actions button:hover { color: var(--aubergine) !important; }
+/* rename/delete stay visible (subtle), brightening on row hover.
+   0.4 dropped the glyphs below a legible contrast ratio; 0.75 keeps them
+   quiet while staying readable. */
+.sb-actions { opacity: 0.75; transition: opacity 0.15s ease; }
+.sb-program-row:hover .sb-actions,
+.sb-program-row:focus-within .sb-actions { opacity: 1; }
+.sb-program-row:hover,
+.sb-program-row:focus-within,
+.sb-program-row.is-active { background: var(--aubergine-wash); }
+.sb-program-row.is-active { color: var(--aubergine); }
+.sb-actions button:hover:not(:disabled) { color: var(--aubergine) !important; }
+.sb-actions button:disabled { cursor: default; opacity: 0.45; }
+
+/* chevron toggle and program name: real buttons, so they need their own reset */
+.sb-toggle {
+  border: none;
+  background: none;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--ink-faint);
+  border-radius: 4px;
+  flex: none;
+}
+.sb-program-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 7px 2px;
+  cursor: pointer;
+  font-size: 13px;
+  color: inherit;
+  text-align: left;
+}
+/* keyboard focus was invisible on every control in this row */
+.sb-program-row button:focus-visible {
+  outline: none;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px rgba(74, 21, 75, 0.35);
+}

@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS manual_overrides (
   id INTEGER PRIMARY KEY AUTOINCREMENT, test_id TEXT NOT NULL REFERENCES tests(id) ON DELETE CASCADE,
   patch_json TEXT NOT NULL, changed_at TEXT NOT NULL, changed_by TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS deletion_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  detail_json TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  deleted_by TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS programs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

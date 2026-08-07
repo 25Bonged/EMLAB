@@ -10,6 +10,15 @@ import { createServer } from '../electron/server.ts'
 import { backfillJ2951 } from '../electron/backfill.ts'
 import { createParsePairProcess } from './parsePairProcess.ts'
 
+// Electron derives app.name -- and therefore app.getPath('userData') -- from
+// package.json's `name`, which is "dashboard". Unset, the shipped app would
+// keep its database and config in ~/Library/Application Support/dashboard
+// (%APPDATA%\dashboard on Windows): generic, and liable to collide with any
+// other app named "dashboard". Set explicitly BEFORE the first getPath call.
+// Changing this after release would orphan every installed user's data, so it
+// has to be right before the first build goes out.
+app.setName('EMLAB')
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 // A fixed '..' is wrong in production: dev runs this file from

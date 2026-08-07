@@ -36,6 +36,8 @@ export function Sidebar() {
 
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => { void loadPrograms() }, [loadPrograms])
 
@@ -49,6 +51,29 @@ export function Sidebar() {
   }), [programs, tests])
 
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }))
+
+  // Deleting drops compliance records, so guard against a second click landing
+  // while the first DELETE is still in flight (the retry 404s), and surface the
+  // failure — nothing else in the sidebar reports it.
+  async function handleDelete(program: { id: string; name: string; count: number }) {
+    if (busyId) return
+    const ok = window.confirm(
+      `Delete program “${program.name}” and its ${program.count} test(s)? Files on disk are kept.`,
+    )
+    if (!ok) return
+    setBusyId(program.id)
+    setActionError(null)
+    try {
+      await removeProgram(program.id)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error))
+      // the store only reloads on success, so resync — a failure usually means
+      // the list is stale (e.g. the program is already gone)
+      await loadPrograms()
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   return (
     <nav
@@ -75,6 +100,12 @@ export function Sidebar() {
         </button>
       </div>
 
+      {actionError && (
+        <div className="service-error" style={{ marginBottom: 10, fontSize: 11.5, padding: '8px 10px' }}>
+          {actionError}
+        </div>
+      )}
+
       {programs.length === 0 && (
         <div style={{ padding: '10px 8px', color: 'var(--ink-faint)', fontSize: 12.5, lineHeight: 1.5 }}>
           No programs yet. Create one to start dropping FEV reports into its folder.
@@ -87,34 +118,56 @@ export function Sidebar() {
         const active = selectedProgram === p.id
         return (
           <div key={p.id} style={{ marginBottom: 2 }}>
-            <div
-              className="sb-program-row"
-              style={{ ...treeRow(active), display: 'flex', alignItems: 'center' }}
-              onClick={() => { selectProgram(p.id); if (expandable) toggle(p.id) }}
-            >
+            {/* A row of real buttons rather than one clickable div: the chevron
+             *  toggles, the name selects, and both are reachable by keyboard. */}
+            <div className={`sb-program-row${active ? ' is-active' : ''}`} style={programRow}>
               {expandable ? (
-                <Switcher open={!!expanded} />
+                <button
+                  type="button"
+                  className="sb-toggle"
+                  aria-expanded={!!expanded}
+                  aria-label={`${expanded ? 'Collapse' : 'Expand'} program ${p.name}`}
+                  onClick={() => toggle(p.id)}
+                >
+                  <Switcher open={!!expanded} />
+                </button>
               ) : (
                 <span className="sb-switcher" style={{ color: 'var(--ink-faint)' }}>·</span>
               )}
-              <span className="font-display" style={{ fontWeight: 600, letterSpacing: '0.02em' }}>{p.name}</span>
-              <span className="font-mono sb-count" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-faint)' }}>
-                {p.count || '—'}
-              </span>
-              <span className="sb-actions" style={{ display: 'flex', gap: 2, marginLeft: 6 }}>
+              <button
+                type="button"
+                className="sb-program-name"
+                aria-current={active || undefined}
+                aria-label={`Program ${p.name}, ${p.count} test${p.count === 1 ? '' : 's'}`}
+                // selecting expands but never collapses — collapsing is the
+                // chevron's job, so you can re-select without losing the tree
+                onClick={() => { selectProgram(p.id); if (expandable && !expanded) toggle(p.id) }}
+              >
+                <span
+                  className="font-display"
+                  style={{ fontWeight: 600, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {p.name}
+                </span>
+                <span className="font-mono sb-count" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-faint)' }}>
+                  {p.count || '—'}
+                </span>
+              </button>
+              <span className="sb-actions" style={{ display: 'flex', gap: 2 }}>
                 <button
+                  type="button"
                   title="Rename program"
-                  onClick={(e) => { e.stopPropagation(); setDialog({ mode: 'rename', id: p.id, name: p.name }) }}
+                  aria-label={`Rename program ${p.name}`}
+                  disabled={busyId === p.id}
+                  onClick={() => setDialog({ mode: 'rename', id: p.id, name: p.name })}
                   style={iconBtn}
                 >✎</button>
                 <button
+                  type="button"
                   title="Delete program (keeps files on disk)"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (window.confirm(`Delete program “${p.name}” and its ${p.count} test(s)? Files on disk are kept.`)) {
-                      void removeProgram(p.id)
-                    }
-                  }}
+                  aria-label={`Delete program ${p.name}`}
+                  disabled={busyId === p.id}
+                  onClick={() => void handleDelete(p)}
                   style={iconBtn}
                 >🗑</button>
               </span>
@@ -147,6 +200,19 @@ export function Sidebar() {
 const iconBtn: React.CSSProperties = {
   border: 'none', background: 'none', cursor: 'pointer', color: 'var(--ink-faint)', fontSize: 12,
   padding: '2px 4px', borderRadius: 6, lineHeight: 1,
+}
+
+/** The program row is a container now, so it carries the selected/hover
+ *  background while its children stay transparent. Selected/hover/focus colours
+ *  live in CSS (.is-active): an inline `background` outranks the stylesheet, so
+ *  setting it here is what kept :hover from ever tinting the row. */
+const programRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  borderRadius: 8,
+  padding: '0 6px',
+  transition: 'background 0.15s ease, color 0.15s ease',
 }
 
 function CycleGroup({
