@@ -16,6 +16,8 @@ OneDrive_*/
 *.xlsm
 STLA_Emission_Result_Compile.xlsx
 backend/data/
+# Personal study material — contains real AIS-175 result-sheet PDFs.
+AIS175_Study/
 dashboard/data/
 **/emissions.db
 # SQLite writes -wal/-shm sidecars alongside the db. They carry the same
