@@ -2,7 +2,15 @@ import { useState } from 'react'
 
 export function ProgramDialog({
   title, initial = '', onSubmit, onClose,
-}: { title: string; initial?: string; onSubmit: (name: string) => Promise<void>; onClose: () => void }) {
+}: {
+  title: string
+  initial?: string
+  // unknown, not void: the sidebar's "create" ignores the result, but
+  // UploadDropzone's create-then-import flow needs the created program back
+  // (to select and target it immediately) — same dialog, callers differ.
+  onSubmit: (name: string) => Promise<unknown>
+  onClose: () => void
+}) {
   const [name, setName] = useState(initial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

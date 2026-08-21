@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 // Vitest and Vite resolve extensionless specifiers; Node's
 // --experimental-strip-types loader — which is how the backend actually runs
@@ -18,9 +19,15 @@ describe('electron module graph resolves under --experimental-strip-types', () =
 
   const importsCleanly = (entry: string) => {
     const file = resolve(electronDir, entry)
+    // dynamic import() resolves its argument as a URL. A raw Windows path
+    // (e.g. "C:\Users\...") is misparsed as scheme "c:", which the default
+    // ESM loader rejects with ERR_UNSUPPORTED_ESM_URL_SCHEME — file paths
+    // must go through pathToFileURL to become a valid file:// URL on every
+    // platform, not just POSIX ones where the raw path already looks right.
+    const href = pathToFileURL(file).href
     execFileSync(
       process.execPath,
-      ['--experimental-strip-types', '--input-type=module', '-e', `await import(${JSON.stringify(file)})`],
+      ['--experimental-strip-types', '--input-type=module', '-e', `await import(${JSON.stringify(href)})`],
       { stdio: 'pipe', timeout: 60_000 },
     )
   }

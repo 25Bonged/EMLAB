@@ -121,6 +121,33 @@ describe('server', () => {
     expect((await app.request(`/api/tests/${id}/approve`, { method: 'POST' })).status).toBe(404)
   })
 
+  it('rejects invalid test patch payloads before writing', async () => {
+    const { testId: id } = db.saveTest(sampleTest(), 'stem', 'h', 'accepted', 'ok')
+
+    const badWp = await app.request(`/api/tests/${id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ wp: 'release' }),
+    })
+    expect(badWp.status).toBe(400)
+
+    const badBasis = await app.request(`/api/tests/${id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        regulatory: {
+          family: 'india-bs6-mn-lt-3p5t', category: 'M3', ignition: 'PI', source: 'manual',
+        },
+      }),
+    })
+    expect(badBasis.status).toBe(400)
+
+    const badMass = await app.request(`/api/tests/${id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ inertia: -1 }),
+    })
+    expect(badMass.status).toBe(400)
+    expect(db.getTest(id)!.wp).toBeUndefined()
+  })
+
   it('imports parsed tests from the browser', async () => {
     const res = await app.request('/api/tests/import-parsed', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -129,6 +156,20 @@ describe('server', () => {
     const body = (await res.json()) as any
     expect(body.count).toBe(2)
     expect(db.listTests()).toHaveLength(2)
+  })
+
+  it('rejects invalid manual import payloads', async () => {
+    const unsupportedPollutant = await app.request('/api/tests/import-parsed', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tests: [sampleTest({ results: { ...sampleTest().results, SO2: 1 } })] }),
+    })
+    expect(unsupportedPollutant.status).toBe(400)
+
+    const tooMany = await app.request('/api/tests/import-parsed', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tests: Array.from({ length: 51 }, (_, i) => sampleTest({ id: `t${i}` })) }),
+    })
+    expect(tooMany.status).toBe(400)
   })
 
   it('serves evidence files with a content-disposition header, 404ing when absent', async () => {

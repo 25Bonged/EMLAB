@@ -1,5 +1,6 @@
 import { CALC_VERSION } from '../src/lib/j2951.ts'
 import { resultForTest } from '../src/lib/j2951ForTest.ts'
+import { buildTest } from '../src/ingest/normalize.ts'
 
 /**
  * Backfills `Test.j2951` for rows written before the drive-trace-index
@@ -21,6 +22,11 @@ interface J2951Store {
   setJ2951(id: string, j2951: Record<string, any>): boolean
 }
 
+interface MetadataStore {
+  listTests(includeNonaccepted?: boolean): Record<string, any>[]
+  backfillMetadata(id: string, patch: Record<string, any>): boolean
+}
+
 /** Recompute every stale or missing result. Returns how many were written. */
 export function backfillJ2951(db: J2951Store): number {
   let written = 0
@@ -28,6 +34,61 @@ export function backfillJ2951(db: J2951Store): number {
     if (test.j2951?.calcVersion === CALC_VERSION) continue
     db.setJ2951(test.id, resultForTest(test as never))
     written += 1
+  }
+  return written
+}
+
+function stemFromSource(test: Record<string, any>): string | null {
+  const source = test.source ?? {}
+  const filePath = source.pdf ?? source.xlsm
+  if (!filePath) return null
+  const name = String(filePath).split(/[\\/]/).pop() ?? ''
+  return name
+    .replace(/_REPORT\.pdf$/i, '')
+    .replace(/_TRACES\.xlsm$/i, '')
+    .replace(/\.[^.]+$/, '') || null
+}
+
+function isEmpty(value: unknown): boolean {
+  return value == null || value === '' || value === 'Unknown'
+}
+
+function isVinLikeVehicle(value: unknown): boolean {
+  return /^MEER[A-Z0-9]+$/i.test(String(value ?? ''))
+}
+
+/**
+ * Backfills display metadata that older parser versions left blank. The source
+ * filename is deliberately used only as a fallback so manual/user-confirmed
+ * metadata is not overwritten.
+ */
+export function backfillFilenameMetadata(db: MetadataStore): number {
+  let written = 0
+  for (const test of db.listTests(true)) {
+    const stem = stemFromSource(test)
+    if (!stem) continue
+    const derived = buildTest(stem, null, null, {}, test.importedAt ?? new Date().toISOString())
+    const patch: Record<string, any> = {}
+
+    if (isEmpty(test.config) && derived.config !== 'Unknown') patch.config = derived.config
+    if (isEmpty(test.cycle) && derived.cycle !== 'Unknown') patch.cycle = derived.cycle
+    if (isEmpty(test.transmission) && derived.transmission !== 'Unknown') patch.transmission = derived.transmission
+    if (isEmpty(test.vnNo) && derived.vnNo) patch.vnNo = derived.vnNo
+    if ((isEmpty(test.vehicleModel) || test.vehicleModel === stem || isVinLikeVehicle(test.vehicleModel))
+      && derived.vehicleModel && derived.vehicleModel !== stem) {
+      patch.vehicleModel = derived.vehicleModel
+    }
+
+    const fixedFlags = new Set<string>()
+    if (patch.config || !isEmpty(test.config)) fixedFlags.add('config')
+    if (patch.cycle || !isEmpty(test.cycle)) fixedFlags.add('cycle')
+    if (patch.transmission || !isEmpty(test.transmission)) fixedFlags.add('transmission')
+    if (fixedFlags.size) {
+      const lowConfidence = (test.lowConfidence ?? []).filter((flag: string) => !fixedFlags.has(flag))
+      if (lowConfidence.length !== (test.lowConfidence ?? []).length) patch.lowConfidence = lowConfidence
+    }
+    if (!Object.keys(patch).length) continue
+    if (db.backfillMetadata(test.id, patch)) written += 1
   }
   return written
 }

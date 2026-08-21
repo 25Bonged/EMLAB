@@ -1,6 +1,14 @@
-import { utilityProcess, type UtilityProcess } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import type { UtilityProcess } from 'electron'
+
+// See the matching comment in electron-main/index.ts: 'electron' must be
+// reached via a real CJS require (Electron's bootstrap only reliably patches
+// that path), with `typeof import('electron')` restoring full typing without
+// re-triggering the ESM import that's actually broken.
+const electron = createRequire(import.meta.url)('electron') as typeof import('electron')
+const { utilityProcess } = electron
 import type { ParsePair } from '../electron/parsePair.ts'
 
 // Match the worker's extension to this file's own runtime extension: '.ts' in

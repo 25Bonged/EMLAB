@@ -5,9 +5,11 @@ import {
 import { useLibrary } from '../store/useLibrary'
 import { useNav } from '../store/useNav'
 import { Panel, Eyebrow, RagBadge, RagDot, Chip } from '../components/common'
-import { ALL_POLL, LIMITED, compliance } from '../lib/derive'
-import { NORM, TARGET, displayUnit, fmt, rag, RAG_COLOR, TRACE_UNIT } from '../model/limits'
-import type { J2951Unavailable, Pollutant, Test } from '../model/types'
+import { ALL_POLL, LIMITED, regulatoryCompliance, targetCompliance } from '../lib/derive'
+import {
+  WORK_PACKAGES, defaultRegulatoryBasis, displayUnit, fmt, limitContext, rag, RAG_COLOR, TRACE_UNIT,
+} from '../model/limits'
+import type { IgnitionType, J2951Unavailable, MnVehicleClass, ObdStage, Pollutant, Test, WorkPackage } from '../model/types'
 import { api } from '../lib/api'
 import { useUnits } from '../store/useUnits'
 import { coldStart, catalystLightoff, cycleMetrics, reconcile, type TraceChannel as LOChannel } from '../lib/engineering'
@@ -30,7 +32,8 @@ export function TestDetail() {
 
   if (!t) return <Panel><div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-dim)' }}>No test selected.</div></Panel>
 
-  const cT = compliance(t, TARGET)
+  const ctx = limitContext(t)
+  const cT = targetCompliance(t) ?? regulatoryCompliance(t)
 
   return (
     <div>
@@ -42,6 +45,7 @@ export function TestDetail() {
             <Eyebrow>{t.project} · {t.lab}</Eyebrow>
             <h2 className="font-cluster" style={{ fontSize: 25, fontWeight: 700, margin: '4px 0 8px' }}>{t.vehicleModel}</h2>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <Chip tone="cyan">{t.wp ?? 'emission'}</Chip>
               <Chip tone="cyan">{t.cycle}</Chip>
               {t.config !== 'Unknown' && <Chip>{t.config}</Chip>}
               <Chip>{t.transmission}</Chip>
@@ -80,6 +84,9 @@ export function TestDetail() {
           <Meta label="Fuel econ" value={t.fuel.consumptionL100 != null ? `${t.fuel.consumptionL100} l/100km` : '—'} />
           <Meta label="Ambient" value={t.conditions.ambientC != null ? `${t.conditions.ambientC} °C` : '—'} />
           <Meta label="RLD A/B/C" value={t.rld.A != null ? `${t.rld.A} / ${t.rld.B} / ${t.rld.C}` : '—'} />
+          <Meta label="Regulation" value={ctx.regulatory?.label ?? 'Not applicable'} />
+          <Meta label="Basis status" value={ctx.basisStatus === 'confirmed' ? 'Confirmed' : 'Needs confirmation'} />
+          <Meta label="Eng target" value={ctx.target?.label ?? 'No target configured'} />
           <Meta label="Library status" value={(t.status ?? 'accepted').replace('_', ' ')} />
           <Meta label="Source result unit" value={t.units?.resultsSource ?? 'mg/km'} />
           {t.source.pdf && <button className="evidence-link" onClick={() => api.downloadOrReport(() => api.downloadEvidence(t.id, 'pdf'), 'Report PDF download')}>Open report PDF ↗</button>}
@@ -88,7 +95,8 @@ export function TestDetail() {
       </Panel>
 
       <div style={{ height: 16 }} />
-      <Eyebrow>Results · vs norm &amp; target</Eyebrow>
+      <Eyebrow>Results · resolved norm &amp; engineering target</Eyebrow>
+      {ctx.message && <div className="analysis-note" style={{ marginBottom: 12 }}>{ctx.message}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, margin: '10px 0 18px' }}>
         {ALL_POLL.map((p) => <ResultCell key={p} test={t} p={p} massUnit={massUnit} />)}
       </div>
@@ -255,8 +263,9 @@ function Meta({ label, value }: { label: string; value: string }) {
 
 function ResultCell({ test, p, massUnit }: { test: Test; p: Pollutant; massUnit: 'mg/km' | 'g/km' }) {
   const v = test.results[p]
-  const target = TARGET.limits[p]
-  const norm = NORM.limits[p]
+  const ctx = limitContext(test)
+  const target = ctx.target?.limits[p] ?? null
+  const norm = ctx.regulatory?.limits[p] ?? null
   const r = rag(v, target)
   const limited = LIMITED.includes(p)
   const pctOfTarget = v != null && target ? Math.min((v / target) * 100, 100) : 0
@@ -275,7 +284,7 @@ function ResultCell({ test, p, massUnit }: { test: Test; p: Pollutant; massUnit:
               <div style={{ width: `${pctOfTarget}%`, height: '100%', background: RAG_COLOR[r] }} />
             </div>
             <div className="font-mono" style={{ fontSize: 10, color: 'var(--ink-faint)', marginTop: 5 }}>
-              tgt {fmt(target, p, massUnit)} · norm {norm != null ? fmt(norm, p, massUnit) : '—'}
+              tgt {target != null ? fmt(target, p, massUnit) : 'not configured'} · norm {norm != null ? fmt(norm, p, massUnit) : 'n/a'}
             </div>
           </>
         )}
@@ -412,10 +421,16 @@ function TraceSection({ test }: { test: Test }) {
 }
 
 function EditPanel({ test, onSave }: { test: Test; onSave: (p: Partial<Test>) => void }) {
+  const basis = defaultRegulatoryBasis(test)
   const [v, setV] = useState({
     vehicleModel: test.vehicleModel ?? '', vinSampleId: test.vinSampleId ?? '', vnNo: test.vnNo ?? '',
     lab: test.lab ?? '', project: test.project, cycle: test.cycle, config: test.config,
     transmission: test.transmission, catalystState: test.catalystState ?? '', stt: test.stt ?? '',
+    wp: test.wp ?? 'emission',
+    category: basis.category,
+    ignition: basis.ignition,
+    referenceMassKg: basis.referenceMassKg == null ? '' : String(basis.referenceMassKg),
+    obdStage: basis.obdStage ?? 'OBD-II',
   })
   const f = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value })
   return (
@@ -433,6 +448,27 @@ function EditPanel({ test, onSave }: { test: Test; onSave: (p: Partial<Test>) =>
       <Field label="Config"><input value={v.config} onChange={f('config')} style={{ width: 90 }} /></Field>
       <Field label="Transmission"><input value={v.transmission} onChange={f('transmission')} style={{ width: 100 }} /></Field>
       <Field label="Catalyst"><input value={v.catalystState} onChange={f('catalystState')} placeholder="fresh / 1k / 3k" style={{ width: 120 }} /></Field>
+      <Field label="WP">
+        <select value={v.wp} onChange={f('wp')}>
+          {WORK_PACKAGES.map((wp) => <option key={wp.id} value={wp.id}>{wp.label}</option>)}
+        </select>
+      </Field>
+      <Field label="M/N class">
+        <select value={v.category} onChange={f('category')}>
+          <option value="M1_M2">M1/M2</option>
+          <option value="N1_I">N1 class I</option>
+          <option value="N1_II">N1 class II</option>
+          <option value="N1_III">N1 class III</option>
+          <option value="N2">N2</option>
+        </select>
+      </Field>
+      <Field label="Ignition">
+        <select value={v.ignition} onChange={f('ignition')}><option value="PI">PI</option><option value="CI">CI</option></select>
+      </Field>
+      <Field label="Ref mass kg"><input value={v.referenceMassKg} onChange={f('referenceMassKg')} style={{ width: 95 }} /></Field>
+      <Field label="OBD stage">
+        <select value={v.obdStage} onChange={f('obdStage')}><option value="OBD-I">OBD-I</option><option value="OBD-II">OBD-II</option></select>
+      </Field>
       <Field label="STT">
         <select value={v.stt} onChange={f('stt')}><option value="">—</option><option>ON</option><option>OFF</option></select>
       </Field>
@@ -444,6 +480,16 @@ function EditPanel({ test, onSave }: { test: Test; onSave: (p: Partial<Test>) =>
             vehicleModel: v.vehicleModel.trim(), vinSampleId: v.vinSampleId.trim(), vnNo: v.vnNo.trim(), lab: v.lab,
             project: v.project, cycle: v.cycle, config: v.config, transmission: v.transmission,
             catalystState: v.catalystState || undefined, stt: (v.stt || null) as Test['stt'],
+            wp: v.wp as WorkPackage,
+            regulatory: {
+              family: 'india-bs6-mn-lt-3p5t',
+              category: v.category as MnVehicleClass,
+              ignition: v.ignition as IgnitionType,
+              referenceMassKg: v.referenceMassKg.trim() ? Number(v.referenceMassKg) : null,
+              directInjection: true,
+              obdStage: v.obdStage as ObdStage,
+              source: 'manual',
+            },
             lowConfidence: test.lowConfidence.filter((x) => !['project', 'cycle', 'config', 'transmission', 'metadata'].includes(x)),
           }
           onSave(patch)

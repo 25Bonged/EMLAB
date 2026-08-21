@@ -44,6 +44,9 @@ Thumbs.db
 *.local
 .env
 .env.*
+scripts/outlook-downloader/config.json
+dashboard/build/icon-source-*.png
+dashboard/build/icon-preview-*.png
 
 # root node_modules is a symlink into a runtime cache — never track it
 /node_modules

@@ -5,13 +5,13 @@ import {
 import { useLibrary, applyFilters } from '../store/useLibrary'
 import { FilterBar } from '../components/FilterBar'
 import { Panel, Eyebrow } from '../components/common'
-import { LIMITED } from '../lib/derive'
-import { NORM, TARGET, displayUnit, displayValue, fmt, RAG_COLOR } from '../model/limits'
-import type { Pollutant } from '../model/types'
+import { isRegulatoryBasisConfirmed, LIMITED, regulatoryProfile, targetProfile } from '../lib/derive'
+import { displayUnit, displayValue, fmt, RAG_COLOR, type LimitProfile } from '../model/limits'
+import type { Pollutant, Test } from '../model/types'
 import { useUnits } from '../store/useUnits'
 
 const GROUP_COLORS = ['#4a154b', '#1264a3', '#007a5a', '#b07d12', '#9b3d6b', '#3860be']
-type GroupKey = 'config' | 'transmission' | 'lab' | 'cycle'
+type GroupKey = 'projectConfig' | 'project' | 'config' | 'transmission' | 'lab' | 'cycle'
 type XKey = 'odo' | 'date'
 
 export function Trends() {
@@ -20,7 +20,7 @@ export function Trends() {
   const rows = useMemo(() => applyFilters(tests, filters), [tests, filters])
   const [poll, setPoll] = useState<Pollutant>('NOx')
   const [xk, setXk] = useState<XKey>('odo')
-  const [group, setGroup] = useState<GroupKey>('config')
+  const [group, setGroup] = useState<GroupKey>('projectConfig')
   const massUnit = useUnits((s) => s.massUnit)
 
   const groups = useMemo(() => {
@@ -29,7 +29,7 @@ export function Trends() {
       const y = t.results[poll]
       const xv = xk === 'odo' ? t.odo : t.date ? Date.parse(t.date) : null
       if (y == null || xv == null) continue
-      const key = String(t[group] ?? 'Unknown')
+      const key = groupValue(t, group)
       const g = m.get(key) ?? { name: key, data: [] }
       g.data.push({ x: xv, y: displayValue(y, poll, massUnit)!, label: `${t.config} ${t.cycle} ${t.date}` })
       m.set(key, g)
@@ -37,11 +37,13 @@ export function Trends() {
     return [...m.values()]
   }, [rows, poll, xk, group, massUnit])
 
-  const target = TARGET.limits[poll]
-  const norm = NORM.limits[poll]
+  const commonTarget = commonProfile(rows.map(targetProfile).filter(Boolean) as LimitProfile[])
+  const commonReg = commonProfile(rows.filter(isRegulatoryBasisConfirmed).map(regulatoryProfile).filter(Boolean) as LimitProfile[])
+  const target = commonTarget?.limits[poll] ?? null
+  const norm = commonReg?.limits[poll] ?? null
   const shownTarget = displayValue(target, poll, massUnit)
   const shownNorm = displayValue(norm, poll, massUnit)
-  const maxY = Math.max(...rows.map((t) => displayValue(t.results[poll], poll, massUnit) ?? 0), shownTarget ?? 0) * 1.12
+  const maxY = Math.max(...rows.map((t) => displayValue(t.results[poll], poll, massUnit) ?? 0), shownTarget ?? 0, shownNorm ?? 0) * 1.12
 
   return (
     <div>
@@ -64,7 +66,9 @@ export function Trends() {
         </Labeled>
         <Labeled label="Group by">
           <select value={group} onChange={(e) => setGroup(e.target.value as GroupKey)}>
-            <option value="config">Config (CC22/CC24)</option>
+            <option value="projectConfig">Program + config</option>
+            <option value="project">Program</option>
+            <option value="config">Config</option>
             <option value="transmission">Transmission</option>
             <option value="lab">Lab (FEV/ARAI)</option>
             <option value="cycle">Cycle</option>
@@ -89,7 +93,7 @@ export function Trends() {
                 type="number" dataKey="x" name={xk}
                 domain={['dataMin', 'dataMax']}
                 tick={{ fontSize: 10, fill: 'var(--ink-faint)' }}
-                tickFormatter={(v) => (xk === 'date' ? new Date(v).toISOString().slice(5, 10) : String(v))}
+                tickFormatter={(v) => (xk === 'date' ? new Date(v).toISOString().slice(5, 10) : `${Math.round(Number(v) / 1000)}k`)}
                 axisLine={{ stroke: 'var(--line-bright)' }} tickLine={false}
               />
               <YAxis
@@ -114,7 +118,7 @@ export function Trends() {
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {shownTarget != null && <ReferenceLine y={shownTarget} stroke={RAG_COLOR.warn} strokeDasharray="5 3" />}
-              {shownNorm != null && shownNorm <= maxY && <ReferenceLine y={shownNorm} stroke={RAG_COLOR.fail} strokeDasharray="5 3" />}
+              {shownNorm != null && <ReferenceLine y={shownNorm} stroke={RAG_COLOR.fail} strokeDasharray="5 3" />}
               {groups.map((g, i) => (
                 <Scatter key={g.name} name={g.name} data={g.data} fill={GROUP_COLORS[i % GROUP_COLORS.length]} line={xk === 'odo'} lineType="fitting" isAnimationActive={false} />
               ))}
@@ -146,4 +150,17 @@ function Legendish({ color, text }: { color: string; text: string }) {
       {text}
     </span>
   )
+}
+
+const groupValue = (t: Test, k: GroupKey): string => {
+  const project = String(t.project || 'Unknown')
+  if (k === 'projectConfig') return `${project} · ${t.config || 'Unknown'}`
+  if (k === 'project') return project
+  return String(t[k] ?? 'Unknown')
+}
+
+function commonProfile(profiles: LimitProfile[]): LimitProfile | null {
+  if (!profiles.length) return null
+  const first = profiles[0]
+  return profiles.every((p) => p.id === first.id) ? first : null
 }

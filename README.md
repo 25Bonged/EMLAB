@@ -12,3 +12,11 @@ npm --prefix dashboard run build
 ```
 
 `./scripts/setup_emlab.sh` runs the first two steps for you.
+
+## Optional Outlook attachment downloader
+
+For Windows machines using Classic Outlook, `scripts/outlook-downloader/` contains
+an optional companion that can save emailed `*_REPORT.pdf` and `*_TRACES.xlsm`
+attachments into existing EMLAB program folders. It stores no mailbox password
+and does not open or execute attachments. See
+`scripts/outlook-downloader/README.md` before scheduling it.

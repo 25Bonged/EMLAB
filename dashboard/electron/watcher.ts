@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import type { Database } from './db.ts'
 import type { ParsePair } from './parsePair.ts'
+import { mkdirWithTimeout } from './fsSafety.ts'
 
 export interface WatcherSettings {
   watchFolder: string
@@ -95,22 +96,14 @@ export class FolderWatcher {
 
   private async scan(): Promise<void> {
     const root = this.settings.watchFolder
-    fs.mkdirSync(root, { recursive: true })
-
-    const groups = new Map<string, { pdf?: string; xlsm?: string }>()
-    for (const entry of fs.readdirSync(root, { recursive: true, encoding: 'utf-8' })) {
-      const full = path.resolve(root, entry)
-      if (!fs.statSync(full).isFile()) continue
-      const upper = path.basename(full).toUpperCase()
-      const kind = upper.endsWith('_REPORT.PDF') ? 'pdf' : upper.endsWith('_TRACES.XLSM') ? 'xlsm' : null
-      if (!kind) continue
-      const stem = stemOf(full)
-      const group = groups.get(stem) ?? {}
-      group[kind] = full
-      groups.set(stem, group)
-    }
-
-    const jobsByStem = new Map(this.db.listJobs().map((job) => [job.stem, job]))
+    // This runs every scanIntervalSeconds on a background timer (see
+    // start() below). A plain mkdirSync here is worse than the same call
+    // anywhere else in the app: it doesn't just fail one user action, it can
+    // freeze the entire app at any moment during otherwise-idle background
+    // use if the watch folder is ever slow to reach (see fsSafety.ts). A
+    // rejection here propagates to tick()'s catch, which already logs and
+    // reschedules -- one missed scan, not a wedged app.
+    await mkdirWithTimeout(root)
 
     // Registered program folders (longest path first so nested matches win).
     const programs = this.db.listPrograms()
@@ -118,11 +111,31 @@ export class FolderWatcher {
       .sort((a, b) => b.folder.length - a.folder.length)
     const programFor = (filePath: string) =>
       programs.find((p) => filePath === p.folder || filePath.startsWith(p.folder + path.sep)) ?? null
+    const jobKeyFor = (program: { id: string; folder: string }, filePath: string, stem: string): string => {
+      const relativeDir = path.relative(program.folder, path.dirname(filePath)) || '.'
+      return `${program.id}|${relativeDir.split(path.sep).join('/')}|${stem}`
+    }
 
-    for (const [stem, pair] of groups) {
-      const { pdf, xlsm } = pair
-      const program = programFor(pdf ?? xlsm ?? '')
+    const groups = new Map<string, { stem: string; program: { id: string; name: string; folder: string }; pdf?: string; xlsm?: string }>()
+    for (const entry of fs.readdirSync(root, { recursive: true, encoding: 'utf-8' })) {
+      const full = path.resolve(root, entry)
+      if (!fs.statSync(full).isFile()) continue
+      const upper = path.basename(full).toUpperCase()
+      const kind = upper.endsWith('_REPORT.PDF') ? 'pdf' : upper.endsWith('_TRACES.XLSM') ? 'xlsm' : null
+      if (!kind) continue
+      const program = programFor(full)
       if (!program) continue // file is not under any registered program folder
+      const stem = stemOf(full)
+      const jobKey = jobKeyFor(program, full, stem)
+      const group = groups.get(jobKey) ?? { stem, program }
+      group[kind] = full
+      groups.set(jobKey, group)
+    }
+
+    const jobsByKey = new Map(this.db.listJobs().map((job) => [job.job_key ?? job.stem, job]))
+
+    for (const [jobKey, pair] of groups) {
+      const { stem, program, pdf, xlsm } = pair
       let pdfHash: string | null
       let xlsmHash: string | null
       try {
@@ -137,7 +150,8 @@ export class FolderWatcher {
       }
 
       if (!pdf || !xlsm) {
-        this.db.updateJob(stem, 'pending_pair', {
+        this.db.updateJob(jobKey, 'pending_pair', {
+          stem,
           pdf_path: pdf ?? null, xlsm_path: xlsm ?? null, pdf_hash: pdfHash, xlsm_hash: xlsmHash,
           message: `Waiting for ${!pdf ? 'REPORT.pdf' : 'TRACES.xlsm'}`,
         })
@@ -145,7 +159,7 @@ export class FolderWatcher {
       }
 
       const combinedHash = createHash('sha256').update(`${pdfHash}:${xlsmHash}`).digest('hex')
-      const current = jobsByStem.get(stem)
+      const current = jobsByKey.get(jobKey)
       const sourceUnchanged = Boolean(
         current && current.pdf_hash === pdfHash && current.xlsm_hash === xlsmHash,
       )
@@ -160,7 +174,8 @@ export class FolderWatcher {
         if (existingTest && existingTest.units?.trace) continue
       }
 
-      this.db.updateJob(stem, 'processing', {
+      this.db.updateJob(jobKey, 'processing', {
+        stem,
         pdf_path: pdf, xlsm_path: xlsm, pdf_hash: pdfHash, xlsm_hash: xlsmHash,
         message: 'Parsing FEV report and traces',
       })
@@ -195,14 +210,16 @@ export class FolderWatcher {
         )
         this.db.registerSource(stem, 'pdf', pdf, pdfHash ?? '', id)
         this.db.registerSource(stem, 'xlsm', xlsm, xlsmHash ?? '', id)
-        this.db.updateJob(stem, status, {
+        this.db.updateJob(jobKey, status, {
+          stem,
           pdf_path: pdf, xlsm_path: xlsm, pdf_hash: pdfHash, xlsm_hash: xlsmHash, test_id: id,
           message: replaced
             ? 'Corrected source replaced active record'
             : low.length ? 'Ready for review' : 'Accepted',
         })
       } catch (error) {
-        this.db.updateJob(stem, 'quarantined', {
+        this.db.updateJob(jobKey, 'quarantined', {
+          stem,
           pdf_path: pdf, xlsm_path: xlsm, pdf_hash: pdfHash, xlsm_hash: xlsmHash,
           message: String(error).slice(0, 1000),
         })

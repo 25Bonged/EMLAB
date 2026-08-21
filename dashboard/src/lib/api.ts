@@ -26,6 +26,7 @@ export interface Health {
 }
 
 export interface IngestionJob {
+  job_key: string
   stem: string
   status: Test['status']
   pdf_path: string | null

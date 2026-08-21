@@ -9,6 +9,7 @@ const RUN_TS = /(\d{4}-\d{2}-\d{2})[ _T](\d{2}-\d{2}-\d{2})/
 
 export function identityKey(test: Record<string, any>, fallbackStem: string): string {
   const fields = [
+    String(test.program_id || test.project || '').trim().toLowerCase(),
     String(test.vehicleModel || '').trim().toLowerCase(),
     String(test.vnNo || '').trim().toLowerCase(),
     String(test.date || '').trim(),
@@ -41,6 +42,10 @@ export class Database {
     const cols = this.db.prepare('PRAGMA table_info(tests)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'program_id')) {
       this.db.exec('ALTER TABLE tests ADD COLUMN program_id TEXT')
+    }
+    const jobCols = this.db.prepare('PRAGMA table_info(ingestion_jobs)').all() as { name: string }[]
+    if (!jobCols.some((c) => c.name === 'job_key')) {
+      this.migrateIngestionJobsToKeyedRows()
     }
   }
 
@@ -168,23 +173,23 @@ export class Database {
     return row ? { ...JSON.parse(row.data_json), status: row.status } : null
   }
 
-  updateJob(stem: string, status: string, fields: Record<string, any> = {}): void {
+  updateJob(jobKey: string, status: string, fields: Record<string, any> = {}): void {
     const now = utcnow()
     this.tx(() => {
-      const previous = this.db.prepare('SELECT first_seen_at FROM ingestion_jobs WHERE stem=?')
-        .get(stem) as { first_seen_at: string } | undefined
+      const previous = this.db.prepare('SELECT first_seen_at FROM ingestion_jobs WHERE job_key=?')
+        .get(jobKey) as { first_seen_at: string } | undefined
       const v = {
         pdf_path: null, xlsm_path: null, pdf_hash: null, xlsm_hash: null,
-        message: null, test_id: null, ...fields,
+        message: null, test_id: null, stem: jobKey, ...fields,
       }
       this.db.prepare(`
-        INSERT INTO ingestion_jobs(stem,status,pdf_path,xlsm_path,pdf_hash,xlsm_hash,message,first_seen_at,updated_at,test_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(stem) DO UPDATE SET status=excluded.status,pdf_path=excluded.pdf_path,
+        INSERT INTO ingestion_jobs(job_key,stem,status,pdf_path,xlsm_path,pdf_hash,xlsm_hash,message,first_seen_at,updated_at,test_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(job_key) DO UPDATE SET stem=excluded.stem,status=excluded.status,pdf_path=excluded.pdf_path,
           xlsm_path=excluded.xlsm_path,pdf_hash=excluded.pdf_hash,xlsm_hash=excluded.xlsm_hash,
           message=excluded.message,updated_at=excluded.updated_at,test_id=excluded.test_id
       `).run(
-        stem, status, v.pdf_path, v.xlsm_path, v.pdf_hash, v.xlsm_hash, v.message,
+        jobKey, v.stem, status, v.pdf_path, v.xlsm_path, v.pdf_hash, v.xlsm_hash, v.message,
         previous ? previous.first_seen_at : now, now, v.test_id,
       )
     })
@@ -237,7 +242,7 @@ export class Database {
     const allowed = new Set([
       'project', 'cycle', 'config', 'transmission', 'lab',
       'vehicleModel', 'vinSampleId', 'vnNo',
-      'catalystState', 'stt', 'startSoc', 'lowConfidence',
+      'catalystState', 'wp', 'regulatory', 'stt', 'startSoc', 'lowConfidence',
       'inertia', 'vehicleRld', 'overrides',
     ])
     const clean: Record<string, any> = {}
@@ -287,6 +292,53 @@ export class Database {
     )
   }
 
+  private migrateIngestionJobsToKeyedRows(): void {
+    this.db.exec('PRAGMA foreign_keys=OFF')
+    this.db.exec('BEGIN')
+    try {
+      this.db.exec(`
+        CREATE TABLE ingestion_jobs_new (
+          job_key TEXT PRIMARY KEY,
+          stem TEXT NOT NULL,
+          status TEXT NOT NULL, pdf_path TEXT, xlsm_path TEXT,
+          pdf_hash TEXT, xlsm_hash TEXT, message TEXT, first_seen_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL, test_id TEXT REFERENCES tests(id) ON DELETE SET NULL
+        );
+        INSERT INTO ingestion_jobs_new(job_key,stem,status,pdf_path,xlsm_path,pdf_hash,xlsm_hash,message,first_seen_at,updated_at,test_id)
+          SELECT stem,stem,status,pdf_path,xlsm_path,pdf_hash,xlsm_hash,message,first_seen_at,updated_at,test_id
+          FROM ingestion_jobs;
+        DROP TABLE ingestion_jobs;
+        ALTER TABLE ingestion_jobs_new RENAME TO ingestion_jobs;
+      `)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    } finally {
+      this.db.exec('PRAGMA foreign_keys=ON')
+    }
+  }
+
+  /** Fill parser-derived metadata for old rows without recording a manual edit. */
+  backfillMetadata(id: string, patch: Record<string, any>): boolean {
+    const current = this.getTest(id)
+    if (!current) return false
+    const allowed = new Set(['cycle', 'config', 'transmission', 'vehicleModel', 'vnNo', 'lowConfidence'])
+    const clean = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)))
+    if (!Object.keys(clean).length) return false
+    const updated = { ...current, ...clean }
+    return this.tx(() =>
+      this.db.prepare(
+        'UPDATE tests SET cycle=?,config=?,transmission=?,vehicle_model=?,vn_no=?,' +
+        'data_json=?,low_confidence_json=?,updated_at=? WHERE id=?',
+      ).run(
+        updated.cycle ?? null, updated.config ?? null, updated.transmission ?? null,
+        updated.vehicleModel ?? null, updated.vnNo ?? null,
+        JSON.stringify(updated), JSON.stringify(updated.lowConfidence ?? []), utcnow(), id,
+      ).changes > 0,
+    )
+  }
+
   deleteTest(id: string): boolean {
     return this.tx(() => {
       this.db.prepare("UPDATE ingestion_jobs SET status='deleted', updated_at=? WHERE test_id=?")
@@ -316,6 +368,12 @@ export class Database {
     const row = this.db.prepare('SELECT id,name,folder,created_at FROM programs WHERE id=?').get(id) as
       | Record<string, any> | undefined
     return row ?? null
+  }
+
+  updateProgramFolder(id: string, folder: string): boolean {
+    return this.tx(() =>
+      this.db.prepare('UPDATE programs SET folder=? WHERE id=?').run(folder, id).changes > 0,
+    )
   }
 
   renameProgram(id: string, name: string): boolean {

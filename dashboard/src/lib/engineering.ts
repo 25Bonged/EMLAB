@@ -1,9 +1,9 @@
 // Engineering analyses over the emission library. All emission values are the
 // canonical mg/km (PN = #/km) stored on Test.results / phases — the same basis as
-// the TARGET/NORM limits, so comparisons are unit-consistent.
+// the active limit profiles, so comparisons are unit-consistent.
 
 import type { Pollutant, Test, TracePoint } from '../model/types'
-import { TARGET, NORM } from '../model/limits'
+import type { LimitProfile } from '../model/limits'
 import { linregress, mean, trapz, type LinFit } from './stats'
 
 const val = (t: Test, p: Pollutant): number | null => t.results[p]
@@ -24,6 +24,10 @@ export interface DeteriorationGroup {
   maxOdo: number
   /** false when the fit is too weak or the mileage spread too short to trust the projection */
   reliable: boolean
+  target: number | null
+  norm: number | null
+  mixedTarget: boolean
+  mixedNorm: boolean
 }
 
 // A projection is only trustworthy with a real trend (R²), enough points, and a
@@ -42,27 +46,43 @@ export function deteriorationByGroup(
   pollutant: Pollutant,
   groupKey: (t: Test) => string,
   usefulLifeKm: number,
+  profiles: {
+    target?: LimitProfile | null
+    norm?: LimitProfile | null
+    targetFor?: (test: Test) => LimitProfile | null
+    normFor?: (test: Test) => LimitProfile | null
+  } = {},
 ): DeteriorationGroup[] {
-  const buckets = new Map<string, { x: number; y: number; label: string }[]>()
+  const fixedTarget = profiles.target === undefined ? null : profiles.target
+  const fixedNorm = profiles.norm === undefined ? null : profiles.norm
+  const buckets = new Map<string, { x: number; y: number; label: string; target: number | null; norm: number | null }[]>()
   for (const t of tests) {
     const y = val(t, pollutant)
     if (y == null || t.odo == null) continue
     const key = groupKey(t)
     const arr = buckets.get(key) ?? []
-    arr.push({ x: t.odo, y, label: `${t.config} ${t.date}` })
+    const targetProfile = profiles.targetFor ? profiles.targetFor(t) : fixedTarget
+    const normProfile = profiles.normFor ? profiles.normFor(t) : fixedNorm
+    arr.push({
+      x: t.odo,
+      y,
+      label: `${t.project} ${t.config} ${t.date}`,
+      target: targetProfile?.limits[pollutant] ?? null,
+      norm: normProfile?.limits[pollutant] ?? null,
+    })
     buckets.set(key, arr)
   }
-  const target = TARGET.limits[pollutant]
-  const norm = NORM.limits[pollutant]
   const out: DeteriorationGroup[] = []
   for (const [group, pts] of buckets) {
     if (pts.length < 2) continue
     const fit = linregress(pts)
     const minOdo = Math.min(...pts.map((p) => p.x))
     const maxOdo = Math.max(...pts.map((p) => p.x))
-    const current = fit.slope * minOdo + fit.intercept
-    const projected = fit.slope * usefulLifeKm + fit.intercept
+    const current = Math.max(0, fit.slope * minOdo + fit.intercept)
+    const projected = Math.max(0, fit.slope * usefulLifeKm + fit.intercept)
     const df = current > 0 ? projected / current : 1
+    const target = commonLimit(pts.map((p) => p.target))
+    const norm = commonLimit(pts.map((p) => p.norm))
     out.push({
       group,
       n: pts.length,
@@ -70,15 +90,27 @@ export function deteriorationByGroup(
       current,
       projected,
       df,
-      exceedsTarget: target != null && projected > target,
-      exceedsNorm: norm != null && projected > norm,
+      exceedsTarget: target.value != null && projected > target.value,
+      exceedsNorm: norm.value != null && projected > norm.value,
       points: pts.sort((a, b) => a.x - b.x),
       minOdo,
       maxOdo,
-      reliable: fit.r2 >= MIN_R2 && pts.length >= MIN_POINTS && maxOdo - minOdo >= MIN_SPAN_KM,
+      reliable: current > 0 && fit.r2 >= MIN_R2 && pts.length >= MIN_POINTS && maxOdo - minOdo >= MIN_SPAN_KM,
+      target: target.value,
+      norm: norm.value,
+      mixedTarget: target.mixed,
+      mixedNorm: norm.mixed,
     })
   }
   return out.sort((a, b) => b.df - a.df)
+}
+
+function commonLimit(values: (number | null)[]): { value: number | null; mixed: boolean } {
+  const concrete = values.filter((v): v is number => v != null)
+  if (!concrete.length) return { value: null, mixed: false }
+  if (concrete.length !== values.length) return { value: null, mixed: true }
+  const first = concrete[0]
+  return concrete.every((v) => Object.is(v, first)) ? { value: first, mixed: false } : { value: null, mixed: true }
 }
 
 /* ============================ Cold-start / phase split ============================ */
@@ -252,7 +284,7 @@ export function sttPairs(tests: Test[], pollutant: Pollutant): SttPair[] {
   for (const t of tests) {
     if (t.stt !== 'ON' && t.stt !== 'OFF') continue
     if (val(t, pollutant) == null) continue
-    const key = `${t.config}·${t.transmission}·${t.cycle}·${t.catalystState ?? ''}·${t.vnNo}`
+    const key = `${projectKey(t)}·${t.config}·${t.transmission}·${t.cycle}·${t.catalystState ?? ''}·${t.vnNo}`
     groups.set(key, [...(groups.get(key) ?? []), t])
   }
   const out: SttPair[] = []
@@ -288,7 +320,7 @@ export function interLab(tests: Test[], pollutant: Pollutant): LabRow[] {
   const groups = new Map<string, Test[]>()
   for (const t of tests) {
     if (val(t, pollutant) == null) continue
-    const key = `${t.config}·${t.transmission}·${t.cycle}`
+    const key = `${projectKey(t)}·${t.config}·${t.transmission}·${t.cycle}`
     groups.set(key, [...(groups.get(key) ?? []), t])
   }
   const out: LabRow[] = []
@@ -308,4 +340,8 @@ export function interLab(tests: Test[], pollutant: Pollutant): LabRow[] {
     })
   }
   return out
+}
+
+function projectKey(test: Test): string {
+  return test.program_id || String(test.project || 'Unknown')
 }

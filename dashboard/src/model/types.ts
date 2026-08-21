@@ -4,6 +4,21 @@ export type Pollutant = (typeof POLLUTANTS)[number]
 export type Project = 'STLA' | 'Honda' | 'RNTBCI' | string
 export type Cycle = 'WLTP' | 'MIDC' | 'NEDC' | 'Unknown' | string
 export type Lab = 'FEV' | 'ARAI' | string
+export type WorkPackage = 'base' | 'emission' | 'drivability' | 'obd'
+export type IgnitionType = 'PI' | 'CI'
+export type MnVehicleClass = 'M1_M2' | 'N1_I' | 'N1_II' | 'N1_III' | 'N2'
+export type ObdStage = 'OBD-I' | 'OBD-II'
+
+export interface RegulatoryBasis {
+  family: 'india-bs6-mn-lt-3p5t'
+  category: MnVehicleClass
+  ignition: IgnitionType
+  /** Reference mass in kg when available. Falls back to inertia only as an engineering default. */
+  referenceMassKg?: number | null
+  directInjection?: boolean | null
+  obdStage?: ObdStage | null
+  source?: 'parsed' | 'manual' | 'default'
+}
 
 export interface PhaseResult {
   name: string
@@ -64,6 +79,8 @@ export interface Test {
   vnNo: string
   date: string // ISO yyyy-mm-dd
   catalystState?: string
+  wp?: WorkPackage
+  regulatory?: RegulatoryBasis
   stt?: 'ON' | 'OFF' | null
   startSoc?: number | null
   inertia?: number | null

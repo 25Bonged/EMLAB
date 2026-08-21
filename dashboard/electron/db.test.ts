@@ -18,7 +18,14 @@ describe('identityKey', () => {
   })
 
   it('lowercases and joins identity fields', () => {
-    expect(identityKey(base, 'nostamp')).toBe('citroen aircross|9740|2026-03-18|wltp|')
+    expect(identityKey(base, 'nostamp')).toBe('|citroen aircross|9740|2026-03-18|wltp|')
+  })
+
+  it('uses program or project as part of identity', () => {
+    expect(identityKey({ ...base, project: 'STLA' }, 'nostamp'))
+      .not.toBe(identityKey({ ...base, project: 'RNTBCI' }, 'nostamp'))
+    expect(identityKey({ ...base, program_id: 'p1', project: 'STLA' }, 'nostamp'))
+      .not.toBe(identityKey({ ...base, program_id: 'p2', project: 'STLA' }, 'nostamp'))
   })
 
   it('includes the run timestamp from the stem so same-day runs stay distinct', () => {
@@ -96,11 +103,14 @@ describe('Database', () => {
   it('preserves first_seen_at across job updates and clears unset fields', () => {
     db.updateJob('stem-1', 'pending_pair', { pdf_path: '/a.pdf', message: 'waiting' })
     const first = db.listJobs()[0]
+    expect(first.job_key).toBe('stem-1')
+    expect(first.stem).toBe('stem-1')
     expect(first.status).toBe('pending_pair')
     expect(first.pdf_path).toBe('/a.pdf')
 
-    db.updateJob('stem-1', 'accepted', { pdf_path: '/a.pdf', xlsm_path: '/a.xlsm' })
+    db.updateJob('stem-1', 'accepted', { stem: 'display-stem', pdf_path: '/a.pdf', xlsm_path: '/a.xlsm' })
     const second = db.listJobs()[0]
+    expect(second.stem).toBe('display-stem')
     expect(second.status).toBe('accepted')
     expect(second.first_seen_at).toBe(first.first_seen_at)
     expect(second.message).toBeNull()
@@ -232,5 +242,12 @@ describe('Database', () => {
     expect(db.deleteProgram(p.id)).toBe(true)
     expect(db.listPrograms()).toEqual([])
     expect(db.listTests()).toEqual([])
+  })
+
+  it('updates a program folder without renaming the program', () => {
+    const p = db.createProgram('STLA', '/onedrive/STLA')
+    expect(db.updateProgramFolder(p.id, '/local/Programs/STLA')).toBe(true)
+    expect(db.getProgram(p.id)!.folder).toBe('/local/Programs/STLA')
+    expect(db.updateProgramFolder('missing', '/local/Programs/RNTBCI')).toBe(false)
   })
 })

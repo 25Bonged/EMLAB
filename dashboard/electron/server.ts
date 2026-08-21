@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { bodyLimit } from 'hono/body-limit'
 import { serveStatic } from '@hono/node-server/serve-static'
 import fs from 'node:fs'
@@ -8,6 +9,7 @@ import type { Database } from './db.ts'
 import type { FolderWatcher } from './watcher.ts'
 import { exportXlsx } from './export.ts'
 import { uniqueProgramFolder } from './programPaths.ts'
+import { mkdirWithTimeout } from './fsSafety.ts'
 import type { Settings } from './config.ts'
 
 /** Hosts this API may legitimately be addressed as. */
@@ -16,6 +18,12 @@ const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/
 /** Largest accepted request body. Import payloads are the only large ones; a
  *  real 30-test browser import is a few MB, so 64 MB is generous. */
 const MAX_BODY_BYTES = 64 * 1024 * 1024
+const MAX_IMPORT_TESTS = 50
+const WORK_PACKAGES = new Set(['base', 'emission', 'drivability', 'obd'])
+const MN_CLASSES = new Set(['M1_M2', 'N1_I', 'N1_II', 'N1_III', 'N2'])
+const IGNITIONS = new Set(['PI', 'CI'])
+const OBD_STAGES = new Set(['OBD-I', 'OBD-II'])
+const POLLUTANTS = new Set(['CO', 'THC', 'NOx', 'CO2', 'CH4', 'NMHC', 'PM', 'PN'])
 
 function isLoopbackOrigin(origin: string): boolean {
   try {
@@ -36,6 +44,73 @@ function sortKeysDeep(value: any): any {
   return value
 }
 
+function isPlainRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validFiniteNumber(value: unknown, min = -Infinity, max = Infinity): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+}
+
+async function readJson(c: { req: { json: () => Promise<any> } }): Promise<{ ok: true; value: any } | { ok: false; detail: string }> {
+  try {
+    return { ok: true, value: await c.req.json() }
+  } catch {
+    return { ok: false, detail: 'Invalid JSON body' }
+  }
+}
+
+function validateRegulatory(value: unknown): string | null {
+  if (!isPlainRecord(value)) return 'regulatory must be an object'
+  if (value.family !== 'india-bs6-mn-lt-3p5t') return 'regulatory.family is not supported'
+  if (!MN_CLASSES.has(String(value.category))) return 'regulatory.category is invalid'
+  if (!IGNITIONS.has(String(value.ignition))) return 'regulatory.ignition is invalid'
+  if (value.obdStage != null && !OBD_STAGES.has(String(value.obdStage))) return 'regulatory.obdStage is invalid'
+  if (value.source != null && !['parsed', 'manual', 'default'].includes(String(value.source))) return 'regulatory.source is invalid'
+  if (value.referenceMassKg != null && !validFiniteNumber(value.referenceMassKg, 0, 5000)) return 'regulatory.referenceMassKg must be 0..5000 kg'
+  if (value.directInjection != null && typeof value.directInjection !== 'boolean') return 'regulatory.directInjection must be boolean'
+  return null
+}
+
+function validatePatchPayload(patch: unknown): string | null {
+  if (!isPlainRecord(patch)) return 'Patch body must be an object'
+  if ('wp' in patch && !WORK_PACKAGES.has(String(patch.wp))) return 'wp is invalid'
+  if ('regulatory' in patch) {
+    const detail = validateRegulatory(patch.regulatory)
+    if (detail) return detail
+  }
+  if ('lowConfidence' in patch && (!Array.isArray(patch.lowConfidence) || patch.lowConfidence.some((x) => typeof x !== 'string' || x.length > 80))) {
+    return 'lowConfidence must be a string array'
+  }
+  for (const key of ['inertia', 'startSoc'] as const) {
+    if (key in patch && patch[key] != null && !validFiniteNumber(patch[key], 0, key === 'startSoc' ? 100 : 5000)) return `${key} is out of range`
+  }
+  if ('vehicleRld' in patch && patch.vehicleRld != null) {
+    if (!isPlainRecord(patch.vehicleRld)) return 'vehicleRld must be an object'
+    for (const key of ['A', 'B', 'C']) {
+      const value = patch.vehicleRld[key]
+      if (value != null && !validFiniteNumber(value, -100000, 100000)) return `vehicleRld.${key} is out of range`
+    }
+  }
+  return null
+}
+
+function validateParsedTest(test: unknown): string | null {
+  if (!isPlainRecord(test)) return 'Each imported test must be an object'
+  if ('wp' in test && test.wp != null && !WORK_PACKAGES.has(String(test.wp))) return 'Imported test wp is invalid'
+  if ('regulatory' in test && test.regulatory != null) {
+    const detail = validateRegulatory(test.regulatory)
+    if (detail) return `Imported test ${detail}`
+  }
+  if (!isPlainRecord(test.results)) return 'Imported test results are required'
+  for (const [pollutant, value] of Object.entries(test.results)) {
+    if (!POLLUTANTS.has(pollutant)) return `Unsupported pollutant ${pollutant}`
+    if (value != null && !validFiniteNumber(value, 0, pollutant === 'PN' ? 1e15 : 1e8)) return `${pollutant} result is out of range`
+  }
+  if (!Array.isArray(test.lowConfidence)) return 'Imported test lowConfidence must be an array'
+  return null
+}
+
 /** Constant-time compare, so a wrong token cannot be recovered by timing. */
 function tokenMatches(supplied: string, expected: string): boolean {
   const a = Buffer.from(supplied)
@@ -52,6 +127,26 @@ export function createServer(
   authToken?: string,
 ): Hono {
   const app = new Hono()
+
+  // The renderer and this API are same-origin in the packaged app (both
+  // served from resolvedAppUrl -- see electron-main/index.ts), so no browser
+  // CORS check ever applies there. In `electron:dev`/`npm run dev` they are
+  // NOT: the renderer loads from Vite's own origin (http://127.0.0.1:5173)
+  // while this API listens on a different port (a random one in Electron,
+  // :8000 standalone). Without a CORS response, Chromium blocks every
+  // request before it reaches the Origin/token checks below with "No
+  // 'Access-Control-Allow-Origin' header is present" -- the API and its auth
+  // are working fine, the browser just never lets the renderer see the
+  // response. Must run before the auth-token middleware: the CORS preflight
+  // (OPTIONS) never carries the x-emlab-token header, so if auth ran first
+  // it would 401 every preflight and produce the exact same symptom.
+  // Reuses isLoopbackOrigin so "which origins are trusted" stays defined in
+  // one place, matching the CSRF guard further down.
+  app.use('*', cors({
+    origin: (origin) => (isLoopbackOrigin(origin) ? origin : ''),
+    allowHeaders: ['Content-Type', 'x-emlab-token'],
+    allowMethods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
+  }))
 
   // Loopback binding stops remote machines, and the Origin/Host guards below
   // stop browsers. Neither stops another *local* process from reading the
@@ -132,14 +227,27 @@ export function createServer(
   })
 
   app.patch('/api/tests/:id', async (c) => {
-    const patch = await c.req.json()
+    const parsed = await readJson(c)
+    if (!parsed.ok) return c.json({ detail: parsed.detail }, 400)
+    const patch = parsed.value
+    const invalid = validatePatchPayload(patch)
+    if (invalid) return c.json({ detail: invalid }, 400)
     const test = db.patchTest(c.req.param('id'), patch)
     return test ? c.json(test) : c.json({ detail: 'Test not found' }, 404)
   })
 
   app.post('/api/tests/import-parsed', async (c) => {
-    const payload = await c.req.json()
+    const parsed = await readJson(c)
+    if (!parsed.ok) return c.json({ detail: parsed.detail }, 400)
+    const payload = parsed.value
+    if (!isPlainRecord(payload)) return c.json({ detail: 'Import body must be an object' }, 400)
     const tests: Record<string, any>[] = payload.tests ?? []
+    if (!Array.isArray(tests)) return c.json({ detail: 'tests must be an array' }, 400)
+    if (tests.length > MAX_IMPORT_TESTS) return c.json({ detail: `At most ${MAX_IMPORT_TESTS} tests can be imported at once` }, 400)
+    for (const test of tests) {
+      const invalid = validateParsedTest(test)
+      if (invalid) return c.json({ detail: invalid }, 400)
+    }
     const program = payload.program_id ? db.getProgram(payload.program_id) : null
     const imported: string[] = []
     for (const test of tests) {
@@ -196,7 +304,17 @@ export function createServer(
     if (path.resolve(folder) !== root && !path.resolve(folder).startsWith(root + path.sep)) {
       return c.json({ detail: 'Invalid program name' }, 400)
     }
-    fs.mkdirSync(folder, { recursive: true })
+    try {
+      // Sync mkdirSync here would block the whole Hono server -- Node is
+      // single-threaded, so a slow write (a monitored/synced folder; see
+      // fsSafety.ts) would freeze every other in-flight request too, not
+      // just this one. The async+timeout version can't hang forever, and
+      // failing with a real error beats the "Saving..." button that never
+      // resolves this used to produce.
+      await mkdirWithTimeout(folder)
+    } catch (error) {
+      return c.json({ detail: error instanceof Error ? error.message : String(error) }, 503)
+    }
     return c.json(db.createProgram(trimmed, folder))
   })
 

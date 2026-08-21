@@ -5,8 +5,8 @@ import {
 import { useLibrary } from '../store/useLibrary'
 import { useNav } from '../store/useNav'
 import { Panel, Eyebrow, RagDot, Chip } from '../components/common'
-import { ALL_POLL, LIMITED, compliance } from '../lib/derive'
-import { TARGET, displayUnit, fmt, RAG_COLOR } from '../model/limits'
+import { ALL_POLL, LIMITED, regulatoryCompliance, targetCompliance } from '../lib/derive'
+import { displayUnit, fmt, RAG_COLOR } from '../model/limits'
 import type { Pollutant, Test, TracePoint } from '../model/types'
 import { useUnits } from '../store/useUnits'
 
@@ -42,7 +42,7 @@ export function Compare() {
         <>
           <MismatchWarning A={A} B={B} />
           <Panel ticks={false} className="rise">
-            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--line)' }}><Eyebrow>Emission results · Δ vs STLA target</Eyebrow></div>
+            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--line)' }}><Eyebrow>Emission results · Δ vs resolved target</Eyebrow></div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
                 <thead>
@@ -111,8 +111,8 @@ function MismatchWarning({ A, B }: { A: Test; B: Test }) {
 function DeltaRow({ p, A, B, massUnit }: { p: Pollutant; A: Test; B: Test; massUnit: 'mg/km' | 'g/km' }) {
   const a = A.results[p]
   const b = B.results[p]
-  const cA = compliance(A, TARGET).perPollutant[p].rag
-  const cB = compliance(B, TARGET).perPollutant[p].rag
+  const cA = (targetCompliance(A) ?? regulatoryCompliance(A)).perPollutant[p].rag
+  const cB = (targetCompliance(B) ?? regulatoryCompliance(B)).perPollutant[p].rag
   const delta = a != null && b != null ? b - a : null
   const pct = a != null && b != null && a !== 0 ? (b - a) / a : null
   const better = delta != null ? (delta < 0 ? 'var(--pass)' : delta > 0 ? 'var(--fail)' : 'var(--ink-dim)') : 'var(--ink-faint)'
@@ -149,7 +149,7 @@ function TestPicker({
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
             <Chip tone="cyan">{t.cycle}</Chip><Chip>{t.transmission}</Chip><Chip>{t.lab}</Chip>
             {t.odo != null && <Chip>ODO {t.odo}</Chip>}
-            <RagDot level={compliance(t, TARGET).overall} />
+            <RagDot level={(targetCompliance(t) ?? regulatoryCompliance(t)).overall} />
           </div>
         )}
       </div>

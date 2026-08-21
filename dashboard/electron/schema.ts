@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS source_files (
   first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS ingestion_jobs (
-  stem TEXT PRIMARY KEY, status TEXT NOT NULL, pdf_path TEXT, xlsm_path TEXT,
+  job_key TEXT PRIMARY KEY,
+  stem TEXT NOT NULL,
+  status TEXT NOT NULL, pdf_path TEXT, xlsm_path TEXT,
   pdf_hash TEXT, xlsm_hash TEXT, message TEXT, first_seen_at TEXT NOT NULL,
   updated_at TEXT NOT NULL, test_id TEXT REFERENCES tests(id) ON DELETE SET NULL
 );

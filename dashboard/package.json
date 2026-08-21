@@ -2,6 +2,8 @@
   "name": "dashboard",
   "private": true,
   "version": "0.0.0",
+  "description": "Emissions test dashboard",
+  "author": "vehiclelab",
   "type": "module",
   "main": "electron-main/index.ts",
   "scripts": {
@@ -16,11 +18,12 @@
     "electron:dev": "npm run build:preload && cross-env EMLAB_DEV=1 electron --experimental-strip-types electron-main/index.ts",
     "build:electron": "tsc -p tsconfig.build.json && npm run build:preload:prod",
     "predist": "npm run build && npm run build:electron",
-    "dist:mac": "electron-builder --mac --config electron-builder.yml",
-    "dist:win": "electron-builder --win --config electron-builder.yml"
+    "dist:mac": "electron-builder --mac --config electron-builder.yml --publish never",
+    "dist:win": "electron-builder --win --config electron-builder.yml --publish never"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
+    "electron-updater": "^6.8.9",
     "exceljs": "^4.4.0",
     "hono": "^4.12.33",
     "jszip": "^3.10.1",

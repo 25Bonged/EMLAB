@@ -6,7 +6,7 @@ export async function exportXlsx(tests: Record<string, any>[]): Promise<Buffer> 
   const ws = wb.addWorksheet('Emission Compilation')
 
   const headers = [
-    'Status', 'Test Date', 'Program', 'Cycle', 'Configuration', 'Transmission', 'Lab',
+    'Status', 'WP', 'Regulation Basis', 'Basis Status', 'Ignition', 'OBD Stage', 'Test Date', 'Program', 'Cycle', 'Configuration', 'Transmission', 'Lab',
     'Vehicle', 'VN No.', 'Catalyst', 'STT', 'Start SOC (%)', 'ODO (km)', 'Inertia (kg)',
     ...POLLUTANTS.flatMap((pollutant) =>
       pollutant === 'PN' ? [`${pollutant} (#/km)`] : [`${pollutant} (mg/km)`, `${pollutant} (g/km)`],
@@ -27,8 +27,13 @@ export async function exportXlsx(tests: Record<string, any>[]): Promise<Buffer> 
         emissionValues.push(value, value != null ? value / 1000 : null)
       }
     }
+    const basisStatus = test.regulatory?.source === 'manual' || test.regulatory?.source === 'parsed' ? 'confirmed' : 'needs confirmation'
     ws.addRow([
-      test.status ?? null, test.date ?? null, test.project ?? null, test.cycle ?? null, test.config ?? null,
+      test.status ?? null, test.wp ?? 'emission',
+      test.regulatory ? `${test.regulatory.family} ${test.regulatory.category}` : 'default M/N M1/M2 PI',
+      basisStatus,
+      test.regulatory?.ignition ?? 'PI', test.regulatory?.obdStage ?? 'OBD-II',
+      test.date ?? null, test.project ?? null, test.cycle ?? null, test.config ?? null,
       test.transmission ?? null, test.lab ?? null, test.vehicleModel ?? null, test.vnNo ?? null,
       test.catalystState ?? null, test.stt ?? null, test.startSoc ?? null, test.odo ?? null,
       test.inertia ?? null, ...emissionValues, (test.units ?? {}).resultsSource ?? 'mg/km',

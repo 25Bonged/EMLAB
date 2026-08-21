@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useLibrary } from '../store/useLibrary'
 import { useNav } from '../store/useNav'
 import { useUnits } from '../store/useUnits'
-import { LIMITED, compliance } from '../lib/derive'
-import { NORM, TARGET, displayUnit, fmt, RAG_COLOR } from '../model/limits'
+import { confirmedRegulatoryCompliance, isRegulatoryBasisConfirmed, LIMITED, regulatoryProfile, targetCompliance, targetProfile } from '../lib/derive'
+import { displayUnit, fmt, RAG_COLOR, type LimitProfile } from '../model/limits'
 import { mean, cpu, wilson, percentile } from '../lib/stats'
 import { coldStart, catalystLightoff, deteriorationByGroup } from '../lib/engineering'
 import type { Pollutant } from '../model/types'
@@ -26,32 +26,46 @@ export function Report() {
   }, [tests, loadDetail])
 
   const a = useMemo(() => {
-    const normPass = tests.filter((t) => compliance(t, NORM).overall !== 'fail').length
-    const tgtPass = tests.filter((t) => compliance(t, TARGET).overall !== 'fail').length
-    const wTgt = wilson(tgtPass, tests.length)
-    const wNorm = wilson(normPass, tests.length)
+    const targetRows = tests.map((t) => ({ test: t, c: targetCompliance(t) })).filter((x): x is { test: typeof tests[number]; c: NonNullable<ReturnType<typeof targetCompliance>> } => x.c != null)
+    const normRows = tests.map((t) => confirmedRegulatoryCompliance(t)).filter(Boolean)
+    const normPass = normRows.filter((c) => c!.overall !== 'fail').length
+    const normPending = tests.length - normRows.length
+    const tgtPass = targetRows.filter(({ c }) => c.overall !== 'fail').length
+    const wTgt = wilson(tgtPass, targetRows.length)
+    const wNorm = wilson(normPass, normRows.length)
+    const targets = uniqueProfiles(tests.map(targetProfile).filter(Boolean) as LimitProfile[])
+    const regs = uniqueProfiles(tests.filter(isRegulatoryBasisConfirmed).map(regulatoryProfile).filter(Boolean) as LimitProfile[])
 
     const perPollutant = LIMITED.map((p) => {
-      const vals = tests.map((t) => t.results[p]).filter((v): v is number => v != null)
-      const target = TARGET.limits[p]!
+      const vals = targetRows.map(({ test }) => test.results[p]).filter((v): v is number => v != null)
+      const target = commonReportLimit(targetRows.map(({ test, c }) => limitFromValueAndMargin(test.results[p], c.perPollutant[p].margin)))
+      if (target.mixed || target.value == null) return null
       return {
-        p, n: vals.length, mean: mean(vals), p95: percentile(vals, 0.95), target,
-        cpk: cpu(vals, target), pass: vals.filter((v) => v <= target).length,
+        p, n: vals.length, mean: mean(vals), p95: percentile(vals, 0.95), target: target.value,
+        cpk: cpu(vals, target.value), pass: targetRows.filter(({ c }) => (c.perPollutant[p].margin ?? -1) >= 0).length,
       }
-    }).filter((s) => s.n > 0)
+    }).filter((s): s is NonNullable<typeof s> => !!s && s.n > 0)
 
     const groups = new Map<string, typeof tests>()
     for (const t of tests) {
-      const key = `${t.config} · ${t.transmission} · ${t.cycle}`
+      const key = `${t.project} · ${t.config} · ${t.transmission} · ${t.cycle}`
       groups.set(key, [...(groups.get(key) ?? []), t])
     }
     const gateRows = [...groups.entries()].map(([name, rows]) => {
       const worst = LIMITED.map((p) => ({
-        p, util: percentile(rows.map((t) => t.results[p]).filter((v): v is number => v != null), 0.95) / TARGET.limits[p]!,
+        p, util: percentile(rows.map((t) => {
+          const c = targetCompliance(t)
+          const v = t.results[p]
+          const m = c?.perPollutant[p].margin
+          const limit = v == null || m == null ? null : v / (1 - m)
+          return limit && v != null ? v / limit : null
+        }).filter((v): v is number => v != null), 0.95),
       })).sort((x, y) => y.util - x.util)[0]
+      const rowTargets = rows.map((t) => targetCompliance(t)).filter(Boolean)
       return {
         name, n: rows.length, lab: [...new Set(rows.map((t) => t.lab))].join('/'),
-        pass: rows.filter((t) => compliance(t, TARGET).overall !== 'fail').length,
+        targetCount: rowTargets.length,
+        pass: rowTargets.filter((c) => c!.overall !== 'fail').length,
         worst: worst.p, util: worst.util,
         level: (worst.util > 1 ? 'fail' : worst.util > 0.8 ? 'warn' : 'pass') as 'fail' | 'warn' | 'pass',
       }
@@ -74,13 +88,17 @@ export function Report() {
     }).filter((r) => r.time != null || r.conv != null)
 
     // Deterioration: only surface groups with a trustworthy fit.
-    const dfGroups = deteriorationByGroup(tests, 'NOx', (t) => t.config, 160000).filter((g) => g.reliable)
+    const dfGroups = deteriorationByGroup(tests, 'NOx', (t) => `${t.project} · ${t.config}`, 160000, {
+      targetFor: targetProfile,
+      normFor: (t) => (isRegulatoryBasisConfirmed(t) ? regulatoryProfile(t) : null),
+    }).filter((g) => g.reliable && !g.mixedNorm && !g.mixedTarget)
 
     return {
-      normPass, tgtPass, wTgt, wNorm, perPollutant, gateRows,
+      normPass, normCount: normRows.length, normPending, tgtPass, targetCount: targetRows.length, wTgt, wNorm, perPollutant, gateRows,
       coldStartRows, lightoff, dfGroups, csCount: csTests.length, loCount: loTests.length,
-      level: normPass < tests.length ? 'fail' : tgtPass < tests.length ? 'warn' : 'pass',
-      label: normPass < tests.length ? 'HOLD' : tgtPass < tests.length ? 'ENGINEERING ACTION' : 'READY FOR RELEASE',
+      regs, targets,
+      level: normPending ? 'warn' : normPass < normRows.length ? 'fail' : targetRows.length && tgtPass < targetRows.length ? 'warn' : !targetRows.length ? 'warn' : 'pass',
+      label: normPending ? 'BASIS REVIEW' : normPass < normRows.length ? 'REGULATORY ACTION' : targetRows.length && tgtPass < targetRows.length ? 'ENGINEERING ACTION' : !targetRows.length ? 'TARGET NOT SET' : 'READY',
       configs: new Set(tests.map((t) => `${t.config}-${t.transmission}`)).size,
       cycles: [...new Set(tests.map((t) => t.cycle))],
       labs: [...new Set(tests.map((t) => t.lab))],
@@ -105,12 +123,13 @@ export function Report() {
         <header className="report-head">
           <div>
             <div className="report-brand">EMLAB</div>
-            <div className="report-sub">Emission Compilation — Release Summary</div>
+            <div className="report-sub">Emission Compilation - Engineering Summary</div>
           </div>
           <div className="report-meta">
             <div><strong>Program(s)</strong> {a.programs.join(', ')}</div>
             <div><strong>Generated</strong> {today}</div>
-            <div><strong>Basis</strong> BS6.2 norm · STLA engineering target</div>
+            <div><strong>Regulation</strong> {a.regs.join('; ') || 'Not applicable'}</div>
+            <div><strong>Target</strong> {a.targets.join('; ') || 'No engineering target configured'}</div>
           </div>
         </header>
 
@@ -120,8 +139,8 @@ export function Report() {
             <div className="report-verdict-label">{a.label}</div>
           </div>
           <div className="report-verdict-stats">
-            <div><strong>{a.tgtPass}/{tests.length}</strong><span>within target</span></div>
-            <div><strong>{a.normPass}/{tests.length}</strong><span>within BS6.2 norm</span></div>
+            <div><strong>{a.tgtPass}/{a.targetCount}</strong><span>within target</span></div>
+            <div><strong>{a.normPass}/{a.normCount}</strong><span>confirmed regulation</span></div>
             <div><strong>{a.configs}</strong><span>configurations</span></div>
           </div>
         </div>
@@ -129,11 +148,12 @@ export function Report() {
         <section>
           <h3 className="report-h">Statistical conformity</h3>
           <p className="report-p">
-            Across {tests.length} compiled tests, {a.tgtPass} pass the STLA engineering target
+            Across {tests.length} compiled tests, {a.targetCount ? `${a.tgtPass} pass the configured engineering target` : 'no engineering target is configured'}
             (true population pass-rate {(a.wTgt.lo * 100).toFixed(0)}–{(a.wTgt.hi * 100).toFixed(0)}% at 95% confidence)
-            and {a.normPass} pass the BS6.2 regulatory norm
+            and {a.normPass} pass the confirmed regulatory profile
             ({(a.wNorm.lo * 100).toFixed(0)}–{(a.wNorm.hi * 100).toFixed(0)}%). Coverage spans
             {' '}{a.cycles.join(', ')} cycles and {a.labs.join(', ')} laboratories.
+            {a.normPending ? ` ${a.normPending} test${a.normPending === 1 ? '' : 's'} require regulatory basis confirmation before official release scoring.` : ''}
           </p>
           <table className="report-table">
             <thead><tr><th>Pollutant</th><th>n</th><th>Mean</th><th>P95</th><th>Target</th><th>Cpk</th><th>Pass</th></tr></thead>
@@ -163,7 +183,7 @@ export function Report() {
                   <td><strong>{g.name}</strong></td>
                   <td>{g.lab}</td>
                   <td>{g.n}</td>
-                  <td>{g.pass}/{g.n}</td>
+                  <td>{g.pass}/{g.targetCount}</td>
                   <td>{g.worst}</td>
                   <td>{g.util.toFixed(2)}×</td>
                   <td><span className="report-gate" style={{ color: RAG_COLOR[g.level], borderColor: `${RAG_COLOR[g.level]}55`, background: `${RAG_COLOR[g.level]}12` }}>{g.level === 'fail' ? 'FAIL' : g.level === 'warn' ? 'MARGINAL' : 'PASS'}</span></td>
@@ -215,9 +235,27 @@ export function Report() {
         )}
 
         <footer className="report-foot">
-          EMLAB emission compilation · values in {massUnit} (PN in #/km) · release status driven by the worst regulated pollutant vs the STLA engineering target. Generated {today}.
+          EMLAB emission compilation · values in {massUnit} (PN in #/km) · regulatory basis and engineering target are resolved per test. Generated {today}.
         </footer>
       </div>
     </div>
   )
+}
+
+function uniqueProfiles(profiles: LimitProfile[]): string[] {
+  return [...new Map(profiles.map((p) => [p.id, p.label])).values()]
+}
+
+function limitFromValueAndMargin(value: number | null, margin: number | null): number | null {
+  return value == null || margin == null || margin >= 1 ? null : value / (1 - margin)
+}
+
+function commonReportLimit(values: (number | null)[]): { value: number | null; mixed: boolean } {
+  const concrete = values.filter((v): v is number => v != null && Number.isFinite(v))
+  if (!concrete.length) return { value: null, mixed: false }
+  if (concrete.length !== values.length) return { value: null, mixed: true }
+  const first = concrete[0]
+  return concrete.every((v) => Math.abs(v - first) <= Math.max(1e-9, Math.abs(first) * 1e-9))
+    ? { value: first, mixed: false }
+    : { value: null, mixed: true }
 }

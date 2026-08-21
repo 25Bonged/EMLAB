@@ -96,6 +96,27 @@ describe('FolderWatcher', () => {
     expect(tests[0].project).toBe('STLA')
   })
 
+  it('keeps identical stems in different program folders isolated', async () => {
+    const other = db.createProgram('RNTBCI', path.join(watch, 'RNTBCI'))
+    mkdirSync(other.folder)
+    writeFileSync(pdf, 'stla-pdf')
+    writeFileSync(xlsm, 'stla-xlsm')
+    writeFileSync(path.join(other.folder, 'FEV_SAMPLE_REPORT.pdf'), 'rntbci-pdf')
+    writeFileSync(path.join(other.folder, 'FEV_SAMPLE_TRACES.xlsm'), 'rntbci-xlsm')
+
+    await watcher.scanOnce()
+
+    const jobs = db.listJobs()
+    expect(jobs).toHaveLength(2)
+    expect(new Set(jobs.map((job) => job.job_key)).size).toBe(2)
+    expect(jobs.map((job) => job.stem).sort()).toEqual(['FEV_SAMPLE', 'FEV_SAMPLE'])
+
+    const tests = db.listTests().sort((a, b) => String(a.project).localeCompare(String(b.project)))
+    expect(tests).toHaveLength(2)
+    expect(tests.map((test) => test.project)).toEqual(['RNTBCI', 'STLA'])
+    expect(new Set(tests.map((test) => test.id)).size).toBe(2)
+  })
+
   it('skips files not under any registered program folder', async () => {
     const stem = 'LOOSE_2026-01-01_09-00-00'
     writeFileSync(path.join(watch, `${stem}_REPORT.pdf`), 'p')

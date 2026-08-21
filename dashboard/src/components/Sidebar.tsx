@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLibrary } from '../store/useLibrary'
 import { useNav } from '../store/useNav'
 import { usePrograms } from '../store/usePrograms'
-import { CYCLE_ORDER, compliance } from '../lib/derive'
-import { TARGET } from '../model/limits'
+import { CYCLE_ORDER, regulatoryCompliance, targetCompliance } from '../lib/derive'
 import { RagDot } from './common'
 import { ProgramDialog } from './ProgramDialog'
 import type { Test } from '../model/types'
@@ -183,7 +182,13 @@ export function Sidebar() {
       })}
 
       {dialog?.mode === 'create' && (
-        <ProgramDialog title="New program" onSubmit={createProgram} onClose={() => setDialog(null)} />
+        <ProgramDialog
+          title="New program"
+          // Select it immediately: a program you just created but have to
+          // then go find and click yourself reads as broken, not empty-by-design.
+          onSubmit={async (name) => selectProgram((await createProgram(name)).id)}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog?.mode === 'rename' && (
         <ProgramDialog
@@ -240,7 +245,7 @@ function CycleGroup({
             .slice()
             .sort((a, b) => (a.date < b.date ? 1 : -1))
             .map((t) => {
-              const v = compliance(t, TARGET).overall
+              const v = (targetCompliance(t) ?? regulatoryCompliance(t)).overall
               const active = t.id === selectedId
               return (
                 <button

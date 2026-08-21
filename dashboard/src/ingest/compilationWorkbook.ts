@@ -104,6 +104,16 @@ function parseSheet(name: string, rows: unknown[][], sourceName: string, importe
     tests.push({
       id: `compile::${name}::${date}::${vnNo || i}`,
       project: 'STLA',
+      wp: 'emission',
+      regulatory: {
+        family: 'india-bs6-mn-lt-3p5t',
+        category: 'M1_M2',
+        ignition: 'PI',
+        referenceMassKg: asNumber(r[col.inertia]),
+        directInjection: true,
+        obdStage: 'OBD-II',
+        source: 'default',
+      },
       cycle: meta.cycle,
       config: meta.config,
       transmission: asText(r[col.transmission]) || meta.transmission,

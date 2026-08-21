@@ -3,8 +3,8 @@ import { useLibrary, applyFilters } from '../store/useLibrary'
 import { useNav } from '../store/useNav'
 import { FilterBar } from '../components/FilterBar'
 import { Panel, Eyebrow, RagDot, Chip } from '../components/common'
-import { ALL_POLL, LIMITED, compliance } from '../lib/derive'
-import { TARGET, displayUnit, fmt, RAG_COLOR } from '../model/limits'
+import { ALL_POLL, LIMITED, targetCompliance } from '../lib/derive'
+import { displayUnit, fmt, RAG_COLOR } from '../model/limits'
 import type { Pollutant, Test } from '../model/types'
 import { api } from '../lib/api'
 import { useUnits } from '../store/useUnits'
@@ -42,7 +42,7 @@ export function MasterTable() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
         <div>
-          <Eyebrow>Master table · vs STLA target</Eyebrow>
+          <Eyebrow>Master table · resolved regulation / target</Eyebrow>
           <h2 className="font-display" style={{ fontSize: 22, fontWeight: 600, margin: '4px 0 0' }}>
             {rows.length} test{rows.length !== 1 ? 's' : ''}
           </h2>
@@ -56,6 +56,7 @@ export function MasterTable() {
             <thead>
               <tr>
                 <Th onClick={() => toggle('date')} active={sort === 'date'} dir={dir} sticky>Date</Th>
+                <Th>WP</Th>
                 <Th onClick={() => toggle('config')} active={sort === 'config'} dir={dir}>Cfg</Th>
                 <Th>Cycle</Th>
                 <Th>Trans</Th>
@@ -71,7 +72,7 @@ export function MasterTable() {
                 <Th>Status</Th>
               </tr>
               <tr>
-                <td colSpan={8} />
+                <td colSpan={9} />
                 {ALL_POLL.map((p) => (
                   <td key={p} className="eyebrow" style={{ textAlign: 'right', padding: '0 10px 6px', fontSize: 8.5, color: 'var(--ink-faint)' }}>
                     {displayUnit(p, massUnit)}
@@ -82,7 +83,7 @@ export function MasterTable() {
             </thead>
             <tbody>
               {rows.map((t) => {
-                const c = compliance(t, TARGET)
+                const c = targetCompliance(t)
                 return (
                   <tr
                     key={t.id}
@@ -91,6 +92,7 @@ export function MasterTable() {
                     className="row"
                   >
                     <td style={td}><span className="font-mono">{t.date || '—'}</span></td>
+                    <td style={td}><Chip tone={t.wp === 'obd' ? 'cyan' : undefined}>{t.wp ?? 'emission'}</Chip></td>
                     <td style={td}>{t.config !== 'Unknown' ? <Chip>{t.config}</Chip> : <span style={{ color: 'var(--ink-faint)' }}>—</span>}</td>
                     <td style={td}><Chip tone="cyan">{t.cycle}</Chip></td>
                     <td style={td}>{t.transmission}</td>
@@ -110,14 +112,14 @@ export function MasterTable() {
                     </td>
                     {ALL_POLL.map((p) => (
                       <td key={p} style={{ ...td, textAlign: 'right' }} className="font-mono">
-                        <span style={{ color: LIMITED.includes(p) ? RAG_COLOR[c.perPollutant[p].rag] : 'var(--ink-dim)' }}>
+                        <span style={{ color: LIMITED.includes(p) && c ? RAG_COLOR[c.perPollutant[p].rag] : 'var(--ink-dim)' }}>
                           {fmt(t.results[p], p, massUnit)}
                         </span>
                       </td>
                     ))}
                     <td style={td}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <RagDot level={c.overall} />
+                        <RagDot level={c?.overall ?? 'na'} />
                         {t.lowConfidence.length > 0 && (
                           <span title={`Needs review: ${t.lowConfidence.join(', ')}`} style={{ color: 'var(--warn)', fontSize: 12 }}>
                             ⚑

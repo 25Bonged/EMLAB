@@ -4,7 +4,7 @@
    EMLAB · Emission Test Dashboard
    Design language: "Slacc" — deep aubergine primary on a warm
    cream-lavender canvas, pastel-mesh atmospherics, pill geometry,
-   Inter / Inter Tight typography. Light, editorial, professional.
+   Local/system typography. Light, editorial, professional.
    =================================================================== */
 
 :root {
@@ -47,6 +47,8 @@
 
   /* App.css legacy token */
   --accent: #4a154b;
+  --font-sans: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
 }
 
 * {
@@ -64,7 +66,7 @@ html {
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss01' 1;
@@ -111,11 +113,11 @@ body {
 /* ===================== Typography ===================== */
 .font-display,
 .font-cluster {
-  font-family: 'Inter Tight', 'Inter', system-ui, sans-serif;
+  font-family: var(--font-display);
   letter-spacing: -0.022em;
 }
 .font-mono {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.005em;
 }
@@ -123,11 +125,11 @@ body {
 h1,
 h2,
 h3 {
-  font-family: 'Inter Tight', 'Inter', system-ui, sans-serif;
+  font-family: var(--font-display);
 }
 
 .eyebrow {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.13em;
@@ -141,7 +143,7 @@ h3 {
   align-items: center;
   gap: 8px;
   color: var(--ink-faint);
-  font: 700 10px 'Inter', sans-serif;
+  font: 700 10px var(--font-sans);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -173,7 +175,7 @@ h3 {
 
 /* ===================== Buttons (pill geometry) ===================== */
 .btn {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 600;
   font-size: 14px;
   letter-spacing: 0;
@@ -218,7 +220,7 @@ h3 {
   position: relative;
   flex: none;
   white-space: nowrap;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 600;
   letter-spacing: 0;
   font-size: 14.5px;
@@ -255,7 +257,7 @@ h3 {
 /* ===================== Inputs ===================== */
 input,
 select {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-sans);
   background: #fff;
   border: 1px solid var(--line-bright);
   color: var(--ink);
@@ -394,7 +396,7 @@ input::placeholder {
   background: linear-gradient(135deg, rgba(22, 163, 74, 0.08), #fff);
 }
 .release-verdict strong {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -415,7 +417,7 @@ input::placeholder {
   padding: 18px 20px;
 }
 .metric-value {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-size: 36px;
   font-weight: 700;
   line-height: 1.05;
@@ -449,7 +451,7 @@ input::placeholder {
   gap: 14px;
 }
 .panel-heading h3 {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.02em;
@@ -461,7 +463,7 @@ input::placeholder {
 
 .legend-inline {
   color: var(--ink-faint);
-  font: 11px 'Inter', sans-serif;
+  font: 11px var(--font-sans);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -487,7 +489,7 @@ input::placeholder {
   border-bottom: 0;
 }
 .insight-index {
-  font: 700 11px 'Inter', sans-serif;
+  font: 700 11px var(--font-sans);
   font-variant-numeric: tabular-nums;
   color: var(--aubergine);
   padding-top: 2px;
@@ -503,7 +505,7 @@ input::placeholder {
 }
 .insight-row strong {
   display: block;
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-size: 14.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -528,7 +530,7 @@ input::placeholder {
   padding: 12px 11px;
   text-align: left;
   color: var(--ink-faint);
-  font: 700 10px 'Inter', sans-serif;
+  font: 700 10px var(--font-sans);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -557,7 +559,7 @@ input::placeholder {
   display: block;
 }
 .readiness-table td:first-child strong {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-weight: 600;
 }
 .readiness-table td:first-child span {
@@ -593,13 +595,13 @@ input::placeholder {
   display: block;
 }
 .recent-evidence > div:first-child > strong {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   font-weight: 600;
 }
 .recent-evidence > div:first-child > span {
   color: var(--ink-faint);
-  font: 11px 'Inter', sans-serif;
+  font: 11px var(--font-sans);
   margin: 3px 0 6px;
 }
 .recent-evidence > div:first-child > div {
@@ -614,12 +616,12 @@ input::placeholder {
   display: block;
 }
 .critical-result strong {
-  font: 700 15px 'Inter Tight', sans-serif;
+  font: 700 15px var(--font-display);
   letter-spacing: -0.01em;
 }
 .critical-result > span:last-child {
   color: var(--ink-faint);
-  font: 600 10.5px 'Inter', sans-serif;
+  font: 600 10.5px var(--font-sans);
   font-variant-numeric: tabular-nums;
 }
 
@@ -738,7 +740,7 @@ input::placeholder {
   display: block;
 }
 .intake-job strong {
-  font: 600 14px 'Inter Tight', sans-serif;
+  font: 600 14px var(--font-display);
   letter-spacing: -0.01em;
 }
 .intake-job > div > span,
@@ -777,12 +779,12 @@ input::placeholder {
   background: rgba(220, 38, 38, 0.07);
   border: 1px solid rgba(220, 38, 38, 0.22);
   border-radius: 10px;
-  font: 500 12.5px 'Inter', sans-serif;
+  font: 500 12.5px var(--font-sans);
 }
 .evidence-link {
   align-self: end;
   color: var(--link);
-  font: 600 13px 'Inter', sans-serif;
+  font: 600 13px var(--font-sans);
   text-decoration: none;
 }
 .evidence-link:hover {
@@ -809,7 +811,7 @@ input::placeholder {
   margin-bottom: 18px;
 }
 .subtab {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 600;
   font-size: 13.5px;
   color: var(--ink-dim);
@@ -869,7 +871,7 @@ input::placeholder {
   border-bottom: 2px solid var(--aubergine);
 }
 .report-brand {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: 26px;
   letter-spacing: -0.02em;
@@ -911,7 +913,7 @@ input::placeholder {
   background: linear-gradient(135deg, rgba(22, 163, 74, 0.08), #fff);
 }
 .report-verdict-label {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: 28px;
   letter-spacing: -0.02em;
@@ -922,7 +924,7 @@ input::placeholder {
   gap: 28px;
 }
 .report-verdict-stats strong {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-size: 22px;
   display: block;
 }
@@ -933,7 +935,7 @@ input::placeholder {
   letter-spacing: 0.06em;
 }
 .report-h {
-  font-family: 'Inter Tight', sans-serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -954,7 +956,7 @@ input::placeholder {
 .report-table th {
   text-align: left;
   padding: 9px 10px;
-  font: 700 10px 'Inter', sans-serif;
+  font: 700 10px var(--font-sans);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -1024,7 +1026,7 @@ input::placeholder {
 
 /* ===================== Recharts polish ===================== */
 .recharts-cartesian-axis-tick-value {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-sans);
 }
 .recharts-tooltip-wrapper {
   outline: none;
@@ -1035,7 +1037,7 @@ input::placeholder {
 }
 .recharts-legend-item-text {
   color: var(--ink-dim) !important;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* ── Programs sidebar: antd-style tree guide lines ── */
