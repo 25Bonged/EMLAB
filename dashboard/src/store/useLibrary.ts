@@ -24,7 +24,12 @@ interface LibraryState {
   load: () => Promise<void>
   refresh: () => Promise<void>
   loadDetail: (id: string) => Promise<void>
-  importFiles: (files: File[]) => Promise<number>
+  // programId is required, not defaulted from the currently-open program in
+  // here: resolving "which program" (open one / ask / prompt to create one
+  // first) is a UI decision with a dialog attached to it, and belongs in the
+  // component driving the import (UploadDropzone), not silently inferred in
+  // the store where a null would previously import with no program at all.
+  importFiles: (files: File[], programId: string | null) => Promise<number>
   patchTest: (id: string, patch: Partial<Test>) => Promise<void>
   approve: (id: string) => Promise<void>
   quarantine: (id: string) => Promise<void>
@@ -89,7 +94,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       tests: state.tests.map((test) => test.id === id ? detail : test),
     }))
   },
-  importFiles: async (files) => {
+  importFiles: async (files, programId) => {
     if (!get().health?.can_edit) throw new Error('Imports are allowed only from the host engineering PC')
     set({ loading: true, progress: { stage: 'Reading files…', done: 0, total: 1 }, error: null })
     try {
@@ -98,7 +103,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       // out of the main bundle.
       const { ingestFiles } = await import('../ingest/ingest')
       const parsed = await ingestFiles(files, (progress) => set({ progress }))
-      const result = await api.importParsed(parsed)
+      const result = await api.importParsed(parsed, programId)
       set({ ...(await fetchState()), loading: false, progress: null })
       return result.count
     } catch (error) {

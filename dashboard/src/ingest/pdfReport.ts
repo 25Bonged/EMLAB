@@ -22,7 +22,10 @@ export interface ParsedReport {
     cellPressure: number | null
     fuelL100: number | null
   }
+  /** Dyno Set A/B/C from the page-4 remarks line. */
   rld: { A: number | null; B: number | null; C: number | null }
+  /** Vehicle A/B/C from the page-1 vehicle table — what J2951 road load uses. */
+  vehicleRld: { A: number | null; B: number | null; C: number | null }
   lowConfidence: string[]
   resultUnit: 'mg/km' | 'g/km'
   pmUnit: 'mg/km' | 'g/km'
@@ -52,6 +55,57 @@ function rightOf(items: TextItem[], label: string, opts: { numeric?: boolean } =
     if (cand) return cand.s
   }
   return null
+}
+
+/**
+ * Vehicle A/B/C from the page-1 vehicle table — the road-load coefficients
+ * SAE J2951 needs. Deliberately NOT `rightOf`: that requires an exact label
+ * match, and the C label is split across items ("Vehicle C [N/(km/h)" plus a
+ * stray "]"), so it would silently miss. Matched by prefix instead.
+ *
+ * These are a different quantity from the Dyno Set A/B/C in the page-4 remarks
+ * that populate `rld` (122.2/0.684/0.0434 vs 48.3933/-0.111/0.04692 on the
+ * sample report). Only page 1 is searched, so the two cannot be confused.
+ *
+ * Naively taking the leftmost numeric on each row is wrong: the "²" in the
+ * Vehicle C unit ("[N/(km/h)²]") is emitted by pdfjs as its own text item
+ * ("2"), superscripted and sitting *left* of the actual value, so it wins a
+ * leftmost-numeric race. It's only ~2pt off the value's dy, too close to the
+ * label's row to reliably separate with a y-tolerance tweak — a fix like that
+ * is exactly how this bug got introduced (tuned against one extractor's
+ * spacing, broke on another's). Instead we use the table's structure: A, B
+ * and C's real values all sit in the same x column, and stray items like the
+ * superscript don't. So collect every numeric candidate per row, then keep
+ * only the leftmost x column shared by all found anchors (columns compared
+ * with a small tolerance since digit widths shift x slightly row to row).
+ */
+function vehicleRldFrom(p1: TextItem[]): { A: number | null; B: number | null; C: number | null } {
+  const letters = ['A', 'B', 'C'] as const
+  const candidatesByLetter: Partial<Record<'A' | 'B' | 'C', TextItem[]>> = {}
+  for (const letter of letters) {
+    const re = new RegExp(`^Vehicle ${letter}\\b`)
+    const a = p1.find((i) => re.test(norm(i.s)))
+    if (!a) continue
+    candidatesByLetter[letter] = p1
+      .filter((i) => near(i.y, a.y, 3) && i.x > a.x + 2 && /^-?[\d.]+$/.test(i.s.replace(/,/g, '')))
+      .sort((p, q) => p.x - q.x)
+  }
+  const found = letters.filter((l) => candidatesByLetter[l])
+  if (found.length < 3) return { A: null, B: null, C: null }
+
+  // Leftmost x column whose value is present (within tolerance) in every row.
+  const [first, ...rest] = found.map((l) => candidatesByLetter[l]!)
+  const sharedX = first
+    .map((c) => c.x)
+    .sort((a, b) => a - b)
+    .find((x) => rest.every((cands) => cands.some((c) => near(c.x, x, 2))))
+  if (sharedX == null) return { A: null, B: null, C: null }
+
+  const pick = (letter: 'A' | 'B' | 'C'): number | null => {
+    const cand = candidatesByLetter[letter]?.find((c) => near(c.x, sharedX, 2))
+    return cand ? num(cand.s) : null
+  }
+  return { A: pick('A'), B: pick('B'), C: pick('C') }
 }
 
 /** value item directly below a label (same x column), matching an optional pattern. */
@@ -216,5 +270,9 @@ export function parseReportItems(pages: PageItems[]): ParsedReport {
   const rld = dm ? { A: +dm[1], B: +dm[2], C: +dm[3] } : { A: null, B: null, C: null }
   if (!dm) low.push('rld')
 
-  return { results, phases, meta, rld, lowConfidence: low, resultUnit, pmUnit }
+  // ---- vehicle A/B/C from the page-1 vehicle table (J2951 road load) ----
+  const vehicleRld = vehicleRldFrom(p1)
+  if (vehicleRld.A == null || vehicleRld.B == null || vehicleRld.C == null) low.push('vehicleRld')
+
+  return { results, phases, meta, rld, vehicleRld, lowConfidence: low, resultUnit, pmUnit }
 }

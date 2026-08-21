@@ -5,8 +5,8 @@ import {
 import { useLibrary } from '../store/useLibrary'
 import { useNav } from '../store/useNav'
 import { Panel, Eyebrow, RagDot, Chip } from '../components/common'
-import { ALL_POLL, LIMITED, compliance } from '../lib/derive'
-import { TARGET, displayUnit, fmt, RAG_COLOR } from '../model/limits'
+import { ALL_POLL, LIMITED, regulatoryCompliance, targetCompliance } from '../lib/derive'
+import { displayUnit, fmt, RAG_COLOR } from '../model/limits'
 import type { Pollutant, Test, TracePoint } from '../model/types'
 import { useUnits } from '../store/useUnits'
 
@@ -40,8 +40,9 @@ export function Compare() {
         <Panel><div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-dim)' }}>Select two tests to compare.</div></Panel>
       ) : (
         <>
+          <MismatchWarning A={A} B={B} />
           <Panel ticks={false} className="rise">
-            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--line)' }}><Eyebrow>Emission results · Δ vs STLA target</Eyebrow></div>
+            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--line)' }}><Eyebrow>Emission results · Δ vs resolved target</Eyebrow></div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
                 <thead>
@@ -70,11 +71,48 @@ export function Compare() {
 
 const cTh: React.CSSProperties = { textAlign: 'left', padding: '11px 16px', background: 'var(--panel)' }
 
+/**
+ * A Δ between two tests is only meaningful when they were measured the same
+ * way. Nothing stops the pickers selecting a WLTP run against a MIDC one, and
+ * mg/km from different cycles are not equivalent quantities — the percentage
+ * would look authoritative and mean nothing. Same for a cold-vs-hot start or a
+ * different lab. We still show the comparison (the user may want it
+ * deliberately) but we say plainly what makes it not like-for-like.
+ */
+function MismatchWarning({ A, B }: { A: Test; B: Test }) {
+  const issues: string[] = []
+  if (A.cycle !== B.cycle) {
+    issues.push(`different cycles (${A.cycle} vs ${B.cycle}) — distance-specific results are not comparable across cycles`)
+  }
+  if (A.lab !== B.lab) issues.push(`different labs (${A.lab} vs ${B.lab}) — inter-lab bias is not corrected for`)
+  if (A.transmission !== B.transmission) issues.push(`different transmissions (${A.transmission} vs ${B.transmission})`)
+  if (A.catalystState && B.catalystState && A.catalystState !== B.catalystState) {
+    issues.push(`different catalyst states (${A.catalystState} vs ${B.catalystState})`)
+  }
+  if (A.id === B.id) issues.push('the same test is selected on both sides')
+  if (!issues.length) return null
+
+  return (
+    <>
+      <Panel ticks={false}>
+        <div style={{
+          padding: '12px 16px', borderLeft: `3px solid ${RAG_COLOR.warn}`,
+          background: `${RAG_COLOR.warn}0e`, fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink-dim)',
+        }}>
+          <strong style={{ color: RAG_COLOR.warn }}>Not like-for-like.</strong>{' '}
+          These two tests differ in ways that affect the comparison: {issues.join('; ')}.
+        </div>
+      </Panel>
+      <div style={{ height: 16 }} />
+    </>
+  )
+}
+
 function DeltaRow({ p, A, B, massUnit }: { p: Pollutant; A: Test; B: Test; massUnit: 'mg/km' | 'g/km' }) {
   const a = A.results[p]
   const b = B.results[p]
-  const cA = compliance(A, TARGET).perPollutant[p].rag
-  const cB = compliance(B, TARGET).perPollutant[p].rag
+  const cA = (targetCompliance(A) ?? regulatoryCompliance(A)).perPollutant[p].rag
+  const cB = (targetCompliance(B) ?? regulatoryCompliance(B)).perPollutant[p].rag
   const delta = a != null && b != null ? b - a : null
   const pct = a != null && b != null && a !== 0 ? (b - a) / a : null
   const better = delta != null ? (delta < 0 ? 'var(--pass)' : delta > 0 ? 'var(--fail)' : 'var(--ink-dim)') : 'var(--ink-faint)'
@@ -111,7 +149,7 @@ function TestPicker({
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
             <Chip tone="cyan">{t.cycle}</Chip><Chip>{t.transmission}</Chip><Chip>{t.lab}</Chip>
             {t.odo != null && <Chip>ODO {t.odo}</Chip>}
-            <RagDot level={compliance(t, TARGET).overall} />
+            <RagDot level={(targetCompliance(t) ?? regulatoryCompliance(t)).overall} />
           </div>
         )}
       </div>

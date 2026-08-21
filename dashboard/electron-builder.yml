@@ -1,0 +1,68 @@
+appId: com.emlab.daily-fev-library
+productName: EMLAB
+directories:
+  output: release
+  buildResources: build
+files:
+  - build-electron/**/*
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: ../scripts/outlook-downloader
+    to: outlook-downloader
+    filter:
+      - '**/*'
+      - '!__pycache__/**'
+      - '!config.json'
+extraMetadata:
+  main: build-electron/electron-main/index.js
+npmRebuild: false
+# electron-updater (electron-main/index.ts) reads this to know where to look
+# for new versions. Populating it does NOT publish anything by itself --
+# electron-builder only uploads a release when run with --publish (or
+# GH_TOKEN + the right flag), which is a separate, deliberate step. Until
+# that happens, this just points a fully-wired but currently-idle update
+# checker at a feed with nothing on it yet.
+publish:
+  provider: github
+  owner: 25Bonged
+  repo: EMLAB
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  icon: build/icon.icns
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeader: build/installer-header.bmp
+  installerSidebar: build/installer-sidebar.bmp
+  uninstallerSidebar: build/installer-sidebar.bmp
+  # A personal desktop tool has no reason to ask for an admin's credentials.
+  # electron-builder's default for an "assisted" (oneClick: false) installer
+  # pulls in its per-machine-capable NSIS path, which is what produced the
+  # UAC "enter an admin username and password" prompt on first run -- not
+  # something a self-signed (or even a real) certificate changes; it's an
+  # install-mode setting, unrelated to signing. Pinning both explicitly forces
+  # a plain per-user install to %LOCALAPPDATA%, no elevation requested at all.
+  perMachine: false
+  allowElevation: false

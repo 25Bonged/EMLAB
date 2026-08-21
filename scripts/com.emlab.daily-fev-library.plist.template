@@ -6,8 +6,7 @@
   <string>com.emlab.daily-fev-library</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__ROOT__/backend/.venv/bin/python3</string>
-    <string>__ROOT__/backend/run.py</string>
+    <string>__ROOT__/scripts/start_emlab.sh</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__ROOT__</string>
@@ -23,8 +22,8 @@
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
-  <string>__ROOT__/backend/logs/emlab.out.log</string>
+  <string>__ROOT__/logs/emlab.out.log</string>
   <key>StandardErrorPath</key>
-  <string>__ROOT__/backend/logs/emlab.err.log</string>
+  <string>__ROOT__/logs/emlab.err.log</string>
 </dict>
 </plist>

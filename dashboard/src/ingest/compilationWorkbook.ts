@@ -104,6 +104,16 @@ function parseSheet(name: string, rows: unknown[][], sourceName: string, importe
     tests.push({
       id: `compile::${name}::${date}::${vnNo || i}`,
       project: 'STLA',
+      wp: 'emission',
+      regulatory: {
+        family: 'india-bs6-mn-lt-3p5t',
+        category: 'M1_M2',
+        ignition: 'PI',
+        referenceMassKg: asNumber(r[col.inertia]),
+        directInjection: true,
+        obdStage: 'OBD-II',
+        source: 'default',
+      },
       cycle: meta.cycle,
       config: meta.config,
       transmission: asText(r[col.transmission]) || meta.transmission,
@@ -124,6 +134,10 @@ function parseSheet(name: string, rows: unknown[][], sourceName: string, importe
         B: col.rld >= 0 ? asNumber(r[col.rld + 1]) : null,
         C: col.rld >= 0 ? asNumber(r[col.rld + 2]) : null,
       },
+      // The compilation workbook carries only the dyno RLD, not the page-1
+      // vehicle A/B/C that J2951 needs. Left null so ER/EER report unavailable
+      // rather than being computed from the wrong coefficients.
+      vehicleRld: { A: null, B: null, C: null },
       fuel: { name: asText(r[col.fuel]) || null, consumptionL100: null, economyKmL: asNumber(r[col.economy]) },
       conditions: { ambientC: asNumber(r[col.ambient]), humidity: null, cellPressure: null },
       results,

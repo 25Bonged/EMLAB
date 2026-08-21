@@ -16,7 +16,13 @@ OneDrive_*/
 *.xlsm
 STLA_Emission_Result_Compile.xlsx
 backend/data/
+# Personal study material — contains real AIS-175 result-sheet PDFs.
+AIS175_Study/
+dashboard/data/
 **/emissions.db
+# SQLite writes -wal/-shm sidecars alongside the db. They carry the same
+# confidential rows, and a hyphen is not matched by `emissions.db.*`.
+**/emissions.db-*
 **/emissions.db.*
 outputs/
 .workbook_inspection/
@@ -38,6 +44,12 @@ Thumbs.db
 *.local
 .env
 .env.*
+scripts/outlook-downloader/config.json
+dashboard/build/icon-source-*.png
+dashboard/build/icon-preview-*.png
 
 # root node_modules is a symlink into a runtime cache — never track it
 /node_modules
+
+# ── Isolated worktrees for parallel/background agent work ──
+.worktrees/

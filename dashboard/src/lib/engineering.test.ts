@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import type { Test, TracePoint } from '../model/types'
 import {
-  deteriorationByGroup, coldStart, catalystLightoff, cycleMetrics, reconcile, sttPairs,
+  deteriorationByGroup, coldStart, catalystLightoff, cycleMetrics, reconcile, sttPairs, interLab,
 } from './engineering'
+import { DEFAULT_TARGET_PROFILE } from '../model/limits'
 
 const base = (over: Partial<Test>): Test => ({
   id: 'x', project: 'STLA', cycle: 'WLTP', config: 'CC24', transmission: 'AT6', lab: 'FEV',
   vehicleModel: 'M', vinSampleId: '', vnNo: '1', date: '2026-01-01',
-  rld: { A: null, B: null, C: null }, fuel: {}, conditions: {},
+  rld: { A: null, B: null, C: null }, vehicleRld: { A: null, B: null, C: null }, fuel: {}, conditions: {},
   results: { CO: null, THC: null, NOx: null, CO2: null, CH4: null, NMHC: null, PM: null, PN: null },
   phases: [], source: {}, lowConfidence: [], importedAt: '', ...over,
 })
@@ -21,12 +22,34 @@ describe('deteriorationByGroup', () => {
       base({ odo: 1000, results: r(25) }),
       base({ odo: 2000, results: r(30) }),
     ]
-    const [g] = deteriorationByGroup(tests, 'NOx', () => 'all', 4000)
+    const [g] = deteriorationByGroup(tests, 'NOx', () => 'all', 4000, { target: DEFAULT_TARGET_PROFILE })
     expect(g.fit.slope).toBeCloseTo(0.005, 6) // 10 over 2000 km
     expect(g.current).toBeCloseTo(20, 6)
     expect(g.projected).toBeCloseTo(40, 6) // 20 + 0.005*4000
     expect(g.df).toBeCloseTo(2, 6)
     expect(g.exceedsTarget).toBe(true) // NOx target 20
+  })
+
+  it('does not invent the STLA target when no target profile is supplied', () => {
+    const tests = [
+      base({ odo: 0, results: r(20), project: 'RNTBCI' }),
+      base({ odo: 1000, results: r(25), project: 'RNTBCI' }),
+    ]
+    const [g] = deteriorationByGroup(tests, 'NOx', () => 'RNTBCI', 4000)
+    expect(g.target).toBeNull()
+    expect(g.exceedsTarget).toBe(false)
+  })
+
+  it('keeps mixed target/no-target groups unresolved instead of applying one project limit to all', () => {
+    const tests = [
+      base({ odo: 0, results: r(20), project: 'STLA' }),
+      base({ odo: 1000, results: r(25), project: 'Honda' }),
+    ]
+    const [g] = deteriorationByGroup(tests, 'NOx', () => 'mixed', 4000, {
+      targetFor: (test) => (test.project === 'STLA' ? DEFAULT_TARGET_PROFILE : null),
+    })
+    expect(g.target).toBeNull()
+    expect(g.mixedTarget).toBe(true)
   })
 })
 
@@ -94,5 +117,23 @@ describe('sttPairs', () => {
     ], 'NOx')
     expect(pairs).toHaveLength(1)
     expect(pairs[0].deltaPct).toBeCloseTo(20, 6) // (24-20)/20
+  })
+
+  it('does not pair start-stop rows from different projects', () => {
+    const pairs = sttPairs([
+      base({ stt: 'ON', vnNo: '9', results: r(20), project: 'STLA' }),
+      base({ stt: 'OFF', vnNo: '9', results: r(24), project: 'RNTBCI' }),
+    ], 'NOx')
+    expect(pairs).toHaveLength(0)
+  })
+})
+
+describe('interLab', () => {
+  it('does not compare lab cohorts across different projects', () => {
+    const rows = interLab([
+      base({ lab: 'FEV', results: r(20), project: 'STLA' }),
+      base({ lab: 'ARAI', results: r(24), project: 'RNTBCI' }),
+    ], 'NOx')
+    expect(rows).toHaveLength(0)
   })
 })

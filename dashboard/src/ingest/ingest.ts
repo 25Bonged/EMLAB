@@ -1,10 +1,4 @@
-import JSZip from 'jszip'
 import type { Test } from '../model/types'
-import { loadPdfPages } from './pdfLoad'
-import { parseReportItems } from './pdfReport'
-import { parseTraceWorkbook, traceUnitMetadata } from './xlsmTrace'
-import { buildTest } from './normalize'
-import { parseCompilationWorkbook } from './compilationWorkbook'
 
 export interface RawFile { name: string; data: ArrayBuffer }
 export interface IngestProgress { stage: string; done: number; total: number }
@@ -21,6 +15,7 @@ export async function expandFiles(files: File[]): Promise<RawFile[]> {
   const out: RawFile[] = []
   for (const f of files) {
     if (/\.zip$/i.test(f.name)) {
+      const { default: JSZip } = await import('jszip')
       const zip = await JSZip.loadAsync(await f.arrayBuffer())
       for (const entry of Object.values(zip.files)) {
         if (entry.dir) continue
@@ -43,6 +38,7 @@ export async function ingestFiles(
   const tests: Test[] = []
   for (const f of files.filter((file) => isCompilationWorkbook(file.name))) {
     onProgress?.({ stage: `Reading ${f.name}`, done: tests.length, total: files.length })
+    const { parseCompilationWorkbook } = await import('./compilationWorkbook')
     tests.push(...parseCompilationWorkbook(await f.arrayBuffer(), f.name))
   }
   const raw = await expandFiles(files)
@@ -57,24 +53,38 @@ export async function ingestFiles(
 
   const importedAt = new Date().toISOString()
   const entries = [...groups.entries()]
+  const hasPdf = entries.some(([, group]) => group.pdf)
+  const hasXlsm = entries.some(([, group]) => group.xlsm)
+  const pdfLoadModule = hasPdf ? import('./pdfLoad') : undefined
+  const pdfReportModule = hasPdf ? import('./pdfReport') : undefined
+  const xlsmModule = hasXlsm ? import('./xlsmTrace') : undefined
+  const normalizeModule = entries.length ? import('./normalize') : undefined
   let done = 0
   for (const [stem, g] of entries) {
     onProgress?.({ stage: `Parsing ${stem}`, done, total: entries.length })
     let report = null
     let trace = null
     try {
-      if (g.pdf) report = parseReportItems(await loadPdfPages(g.pdf.data))
+      if (g.pdf && pdfLoadModule && pdfReportModule) {
+        const [{ loadPdfPages }, { parseReportItems }] = await Promise.all([pdfLoadModule, pdfReportModule])
+        report = parseReportItems(await loadPdfPages(g.pdf.data))
+      }
     } catch (e) {
       console.error('PDF parse failed', stem, e)
     }
     try {
-      if (g.xlsm) trace = parseTraceWorkbook(g.xlsm.data)
+      if (g.xlsm && xlsmModule) {
+        const { parseTraceWorkbook } = await xlsmModule
+        trace = parseTraceWorkbook(g.xlsm.data)
+      }
     } catch (e) {
       console.error('XLSM parse failed', stem, e)
     }
-    if (report || trace) {
+    if ((report || trace) && normalizeModule) {
+      const { buildTest } = await normalizeModule
       const test = buildTest(stem, report, trace, { pdf: g.pdf?.name, xlsm: g.xlsm?.name }, importedAt)
       if (g.xlsm) {
+        const { traceUnitMetadata } = await xlsmModule!
         test.units = {
           ...(test.units ?? { resultsCanonical: 'mg/km', resultsSource: 'mg/km' }),
           trace: traceUnitMetadata(g.xlsm.data),

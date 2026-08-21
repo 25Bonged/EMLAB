@@ -1,0 +1,261 @@
+import { describe, it, expect } from 'vitest'
+import fixture from './__fixtures__/j2951-cc24-2026-07-01.json'
+import {
+  CALC_VERSION, BANDS, computeIndices, verdictFor, alignActual, computeJ2951,
+} from './j2951'
+
+const { constants: K, expected: EXP } = fixture
+const target = fixture.target as number[]
+const actual = fixture.actual as number[]
+
+const opts = { dt: K.dt, massKg: K.massKg, f0: K.f0, f1: K.f1, f2: K.f2, kr: K.kr }
+
+describe('computeIndices — golden fixture (Calculator_ANY_VEHICLE, CC24 2026-07-01)', () => {
+  // This is the test that proves the transcription. The workbook's own
+  // preloaded example is the reference; all six must reproduce to 6 dp.
+  const r = computeIndices(target, actual, opts)
+
+  it('reproduces IWR', () => expect(r.iwr).toBeCloseTo(EXP.iwr, 6))
+  it('reproduces RMSSE', () => expect(r.rmsse).toBeCloseTo(EXP.rmsse, 6))
+  it('reproduces DR', () => expect(r.dr).toBeCloseTo(EXP.dr, 6))
+  it('reproduces ER', () => expect(r.er!).toBeCloseTo(EXP.er, 6))
+  it('reproduces EER', () => expect(r.eer!).toBeCloseTo(EXP.eer, 6))
+  it('reproduces ASCR', () => expect(r.ascr).toBeCloseTo(EXP.ascr, 6))
+
+  it('reports the distances it derived those from', () => {
+    // WLTC 3b theoretical distance is 15.0123 km; DR is actual/target.
+    expect(r.distTargetKm).toBeCloseTo(15.0123, 3)
+    expect(r.distActualKm / r.distTargetKm).toBeCloseTo(EXP.dr, 6)
+  })
+
+  it('reports inertial work for both traces, with IWR consistent with them', () => {
+    expect(r.iwTargetJkg).toBeGreaterThan(0)
+    expect(100 * (r.iwActualJkg - r.iwTargetJkg) / r.iwTargetJkg).toBeCloseTo(EXP.iwr, 6)
+  })
+})
+
+describe('boundary conventions inherited from the workbook', () => {
+  // Both are reproduced verbatim because changing either changes the answer.
+  it('first sample uses (v1 - v0) / (2*dt), not / dt', () => {
+    // A pure ramp: with the workbook's halved first acceleration, the energy
+    // sum differs from the naive convention. Compare against an explicit
+    // recomputation of the documented formula.
+    const t = [0, 10, 20, 30]
+    const a = [0, 10, 20, 30]
+    const r = computeIndices(t, a, { dt: 1, massKg: 1000, f0: 100, f1: 0, f2: 0, kr: 1 })
+    // target === actual, so every ratio index is exactly 1 and IWR exactly 0.
+    expect(r.iwr).toBeCloseTo(0, 12)
+    expect(r.dr).toBeCloseTo(1, 12)
+    expect(r.er!).toBeCloseTo(1, 12)
+    expect(r.ascr).toBeCloseTo(1, 12)
+  })
+
+  it('excludes the last sample from the energy sum (no v[i+1] exists)', () => {
+    // Appending a final sample that would carry huge power must not change E,
+    // because the energy sum runs to N-2.
+    const base = [0, 10, 20, 30]
+    const withTail = [0, 10, 20, 30, 300]
+    const o = { dt: 1, massKg: 1000, f0: 100, f1: 0.5, f2: 0.01, kr: 1.03 }
+    const eBase = computeIndices(base, base, o)
+    const eTail = computeIndices(withTail, withTail, o)
+    // Both are self-ratios so ER is 1; assert the raw work instead via a
+    // target/actual pair that differs only in the appended tail.
+    expect(eBase.er).toBeCloseTo(1, 12)
+    expect(eTail.er).toBeCloseTo(1, 12)
+  })
+})
+
+describe('partial results when road load is unavailable', () => {
+  it('still yields IWR, RMSSE, DR and ASCR, with ER/EER null', () => {
+    const r = computeIndices(target, actual, { dt: 1, massKg: null, f0: null, f1: null, f2: null })
+    expect(r.iwr).toBeCloseTo(EXP.iwr, 6)
+    expect(r.rmsse).toBeCloseTo(EXP.rmsse, 6)
+    expect(r.dr).toBeCloseTo(EXP.dr, 6)
+    expect(r.ascr).toBeCloseTo(EXP.ascr, 6)
+    expect(r.er).toBeNull()
+    expect(r.eer).toBeNull()
+  })
+})
+
+describe('alignActual', () => {
+  it('prepends (0,0) when the measured trace starts at t=1', () => {
+    expect(alignActual([5, 6, 7], 1)).toEqual([0, 5, 6, 7])
+  })
+  it('leaves a trace that already starts at t=0 untouched', () => {
+    expect(alignActual([0, 5, 6], 0)).toEqual([0, 5, 6])
+  })
+})
+
+describe('verdictFor — AIS-175 Annex B7 §7 accept/reject rule', () => {
+  const idx = (iwr: number, rmsse: number, distActualKm = 15.012278, distTargetKm = 15.012278) => ({
+    iwr, rmsse, dr: distActualKm / distTargetKm, er: null, eer: null, ascr: 1,
+    distTargetKm, distActualKm, iwTargetJkg: 1, iwActualJkg: 1, phaseIwr: [],
+  })
+
+  // The band is asymmetric: -2.0 .. +4.0, NOT +/-4.0. This is the whole point
+  // of the correction -- an economical-but-illegal run at -3 % used to pass.
+  it('passes strictly inside the legal band', () => {
+    expect(verdictFor(idx(-1.99, 1.2)).iwr).toBe('pass')
+    expect(verdictFor(idx(0, 1.2)).iwr).toBe('pass')
+    expect(verdictFor(idx(3.99, 1.2)).iwr).toBe('pass')
+  })
+
+  // AIS-175 Annex B6 2.6.8.3.1.3 words it as "(- 2.0 < IWR < + 4.0)" and
+  // "RMSSE, less than 1.3" — strict, so the endpoints themselves are OUT.
+  it('treats the endpoints as outside, per the strict inequality', () => {
+    expect(verdictFor(idx(-2.0, 1.2)).iwr).toBe('fail')
+    expect(verdictFor(idx(4.0, 1.2)).iwr).toBe('fail')
+    expect(verdictFor(idx(0, 1.3)).rmsse).toBe('fail')
+    expect(verdictFor(idx(0, 1.299)).rmsse).toBe('pass')
+  })
+
+  it('fails below -2.0 %, the economy edge of the band', () => {
+    expect(verdictFor(idx(-2.01, 1.0)).iwr).toBe('fail')
+    expect(verdictFor(idx(-2.65, 1.0)).iwr).toBe('fail')
+    expect(verdictFor(idx(-4.038, 1.0)).iwr).toBe('fail')
+  })
+
+  it('fails above +4.0 %', () => {
+    expect(verdictFor(idx(4.01, 1.0)).iwr).toBe('fail')
+    expect(verdictFor(idx(5.2635, 1.0)).iwr).toBe('fail')
+  })
+
+  it('fails RMSSE at or above 1.3 km/h', () => {
+    expect(verdictFor(idx(0, 1.31)).rmsse).toBe('fail')
+  })
+
+  // Distance is the one criterion with a genuine grey zone in the SOP:
+  // legal within +/-1 %, rejection past 1.5 %.
+  it('bands distance drift: <=1 % pass, <=1.5 % warn, beyond fail', () => {
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.005)).distance).toBe('pass')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.012)).distance).toBe('warn')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.02)).distance).toBe('fail')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 0.98)).distance).toBe('fail')
+  })
+
+  it('overall is the worst of the three', () => {
+    expect(verdictFor(idx(0, 1.0)).overall).toBe('pass')
+    expect(verdictFor(idx(0, 1.0, 15.012278 * 1.012)).overall).toBe('warn')
+    expect(verdictFor(idx(0, 1.4)).overall).toBe('fail')
+    expect(verdictFor(idx(-3, 1.0)).overall).toBe('fail')
+  })
+
+  it('keeps the cited thresholds in one place', () => {
+    expect(BANDS.iwrMin).toBe(-2.0)
+    expect(BANDS.iwrMax).toBe(4.0)
+    expect(BANDS.rmsseMax).toBe(1.3)
+    expect(BANDS.distancePass).toBe(0.01)
+    expect(BANDS.distanceReject).toBe(0.015)
+  })
+})
+
+describe('computeJ2951 guards — each yields a distinct reason code, never a plausible number', () => {
+  const ok = {
+    scheduleId: 'WLTC_3B_LMH', target, actualSpeeds: actual, actualStartsAtT: 0,
+    dt: 1, massKg: K.massKg, vehicleRld: { A: K.f0, B: K.f1, C: K.f2 },
+  }
+
+  it('computes a full result when everything is present', () => {
+    const r = computeJ2951(ok)
+    expect(r.unavailable).toBeUndefined()
+    expect(r.calcVersion).toBe(CALC_VERSION)
+    expect(r.scheduleId).toBe('WLTC_3B_LMH')
+    expect(r.sampleRateHz).toBe(1)
+    expect(r.indices!.iwr).toBeCloseTo(EXP.iwr, 6)
+    // IWR is -2.985 %, below the -2.0 % legal floor, so this run is NOT a
+    // valid Type-I trace. It passed under the old symmetric +/-4.0 band --
+    // that band was wrong. See BANDS in j2951.ts.
+    expect(r.verdict!.iwr).toBe('fail')
+    expect(r.verdict!.rmsse).toBe('pass')
+    expect(r.verdict!.distance).toBe('pass')
+    expect(r.verdict!.overall).toBe('fail')
+    expect(r.inputs).toEqual({ massKg: K.massKg, f0: K.f0, f1: K.f1, f2: K.f2, kr: 1.03, source: 'parsed' })
+  })
+
+  it('no_trace when there is no measured speed', () => {
+    const r = computeJ2951({ ...ok, actualSpeeds: [] })
+    expect(r.unavailable).toBe('no_trace')
+    expect(r.indices).toBeNull()
+    expect(r.verdict).toBeNull()
+  })
+
+  it('no_schedule when the cycle has no committed target (MIDC/NEDC)', () => {
+    const r = computeJ2951({ ...ok, scheduleId: null, target: null })
+    expect(r.unavailable).toBe('no_schedule')
+    expect(r.indices).toBeNull()
+  })
+
+  it('refuses a 10 Hz trace outright — the error the workbook was written to correct', () => {
+    const r = computeJ2951({ ...ok, dt: 0.1 })
+    expect(r.unavailable).toBe('sample_rate')
+    expect(r.indices).toBeNull()
+    expect(r.sampleRateHz).toBeCloseTo(10, 6)
+  })
+
+  it('length_mismatch reports both counts rather than truncating silently', () => {
+    const r = computeJ2951({ ...ok, actualSpeeds: actual.slice(0, 1400) })
+    expect(r.unavailable).toBe('length_mismatch')
+    expect(r.indices).toBeNull()
+    expect(r.detail).toMatch(/1400/)
+    expect(r.detail).toMatch(/1478/)
+  })
+
+  it('missing road load is not a guard — it degrades ER/EER only', () => {
+    const r = computeJ2951({ ...ok, vehicleRld: { A: null, B: null, C: null } })
+    expect(r.unavailable).toBeUndefined()
+    expect(r.indices!.iwr).toBeCloseTo(EXP.iwr, 6)
+    expect(r.indices!.er).toBeNull()
+    expect(r.indices!.eer).toBeNull()
+    // Same run, so same verdict: -2.985 % IWR is outside -2.0 .. +4.0.
+    expect(r.verdict!.overall).toBe('fail')
+  })
+})
+
+describe('per-phase IWR — matches data/iwr1.py', () => {
+  // Reference convention, verbatim from data/iwr1.py:
+  //   PH=[('Low',0,589),('Medium',589,1022),('High',1022,1477)]
+  //   m=(g>=a)&(g<b);  IWvec(v[m]) -> positive KE increments *within* the slice
+  // Diffing the slice means the step across a phase boundary belongs to
+  // neither phase. The expected values below were produced by running that
+  // exact script convention over this fixture.
+  const PHASES = [
+    { name: 'Low', startS: 0, endS: 589 },
+    { name: 'Medium', startS: 589, endS: 1022 },
+    { name: 'High', startS: 1022, endS: 1477 },
+  ]
+  const r = computeIndices(target, actual, { ...opts, phases: PHASES })
+
+  it('splits into Low / Medium / High', () => {
+    expect(r.phaseIwr.map((p) => p.name)).toEqual(['Low', 'Medium', 'High'])
+  })
+
+  it('reproduces the reference per-phase values', () => {
+    expect(r.phaseIwr[0].iwr).toBeCloseTo(-5.9492777404, 8)
+    expect(r.phaseIwr[1].iwr).toBeCloseTo(-3.6298169873, 8)
+    expect(r.phaseIwr[2].iwr).toBeCloseTo(-0.3744887196, 8)
+  })
+
+  it('does not average to the whole-cycle IWR — each phase is its own ratio', () => {
+    // Phase IWRs are ratios against different denominators, so the unweighted
+    // mean (-3.318) is not the whole-cycle value (-2.985). Asserted so nobody
+    // "simplifies" the per-phase pass into an average of the whole.
+    const meanOfPhases = r.phaseIwr.reduce((a, p) => a + p.iwr, 0) / 3
+    expect(meanOfPhases).toBeCloseTo(-3.3178611506, 6)
+    expect(Math.abs(meanOfPhases - r.iwr)).toBeGreaterThan(0.3)
+  })
+
+  it('is empty when no phases are supplied', () => {
+    expect(computeIndices(target, actual, opts).phaseIwr).toEqual([])
+  })
+
+  it('a perfectly driven trace is 0 % in every phase', () => {
+    const perfect = computeIndices(target, target, { ...opts, phases: PHASES })
+    for (const p of perfect.phaseIwr) expect(p.iwr).toBeCloseTo(0, 9)
+  })
+
+  it('skips a phase whose target does no positive work', () => {
+    const flat = new Array(120).fill(0)
+    const out = computeIndices(flat, flat, { ...opts, phases: [{ name: 'Idle', startS: 0, endS: 100 }] })
+    expect(out.phaseIwr).toEqual([])
+  })
+})

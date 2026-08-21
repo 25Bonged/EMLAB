@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseTraceWorkbook, traceUnitMetadata } from './xlsmTrace'
 
+// Real FEV trace data — confidential, never committed (see .gitignore's
+// "OneDrive_*/" rule). Present on engineering machines only, so this suite
+// skips itself in CI and on any machine without the fixture checked out,
+// rather than failing on a file that was never meant to exist there.
 const FILE = resolve(
   __dirname,
   '../../../OneDrive_3_6-20-2026 (1)/OneDrive_1_6-20-2026/CITROEN_AIRCROSS_MT_9740_5099_2026-03-18_09-51-01_TRACES.xlsm',
 )
+const hasFixture = existsSync(FILE)
 
-describe('FEV trace workbook extraction', () => {
+describe.skipIf(!hasFixture)('FEV trace workbook extraction', () => {
   it('extracts trace channels with their native units', () => {
     const bytes = readFileSync(FILE)
     const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLIST="$HOME/Library/LaunchAgents/com.emlab.daily-fev-library.plist"
-mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/backend/logs"
+mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/logs"
 
 sed \
   -e "s|__ROOT__|$ROOT|g" \

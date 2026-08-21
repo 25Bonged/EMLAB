@@ -1,0 +1,16 @@
+{
+  "output_root": "%APPDATA%\\EMLAB\\Programs",
+  "subject_keyword": "EM tests",
+  "lookback_days": 7,
+  "max_saved_files": 20,
+  "allowed_senders": [],
+  "allowed_extensions": [".pdf", ".xlsm"],
+  "create_missing_program_folders": false,
+  "unmatched_folder": "_email_downloads_needs_program",
+  "route_layout": "project/transmission/vehicle",
+  "project_rules": {
+    "STLA": ["CITROEN", "AIRCROSS"],
+    "RNTBCI": ["RNTBCI", "DUSTER", "TRIBER", "HR10", "HR13", "RBC", "R1324"]
+  },
+  "dry_run": false
+}
