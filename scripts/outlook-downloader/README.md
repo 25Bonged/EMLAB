@@ -12,6 +12,10 @@ It does not open attachments, execute macros, store mailbox passwords, bypass
 Defender, require Python, or require administrator rights. The shipped runner
 uses Windows PowerShell and Classic Outlook's signed-in profile.
 
+Production sender allowlist is fixed in the downloader:
+`rajput@fev.com` and `tandulkar@fev.com`. Messages from any other sender are
+ignored even if a local config file is edited.
+
 ## Setup
 
 1. Run `run_emlab_downloader.bat` once. It creates the runtime config at
@@ -27,10 +31,7 @@ uses Windows PowerShell and Classic Outlook's signed-in profile.
    `RNTBCI`. The downloader saves into those existing project folders. If a
    matching folder is missing, files go to
    `_email_downloads_needs_program` for manual review.
-4. Add exact sender addresses in `allowed_senders` before daily use. The
-   downloader and scheduled-task installer intentionally fail while this list
-   is empty.
-5. Validate the config without touching Outlook:
+4. Validate the config without touching Outlook:
 
    ```bat
    powershell -NoProfile -ExecutionPolicy Bypass -File download_emlab_attachments.ps1 -Config "%APPDATA%\EMLAB\outlook-downloader\config.json" -CheckConfig

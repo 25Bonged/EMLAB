@@ -22,12 +22,13 @@ from typing import Any
 OUTLOOK_INBOX = 6
 MAIL_ITEM_CLASS = 43
 DEFAULT_CONFIG_FILE = Path(__file__).with_name("config.json")
+PRODUCTION_ALLOWED_SENDERS = {"rajput@fev.com", "tandulkar@fev.com"}
 DEFAULT_CONFIG: dict[str, Any] = {
     "output_root": r"%APPDATA%\EMLAB\Programs",
     "subject_keyword": "EM tests",
     "lookback_days": 7,
     "max_saved_files": 20,
-    "allowed_senders": [],
+    "allowed_senders": sorted(PRODUCTION_ALLOWED_SENDERS),
     "allowed_extensions": [".pdf", ".xlsm"],
     "create_missing_program_folders": False,
     "unmatched_folder": "_email_downloads_needs_program",
@@ -85,7 +86,7 @@ def load_config(config_file: Path) -> Config:
         subject_keyword=str(raw.get("subject_keyword", "EM tests")),
         lookback_days=int(raw.get("lookback_days", 7)),
         max_saved_files=max_saved_files if max_saved_files > 0 else None,
-        allowed_senders={str(sender).strip().lower() for sender in raw.get("allowed_senders", []) if str(sender).strip()},
+        allowed_senders=set(PRODUCTION_ALLOWED_SENDERS),
         allowed_extensions=allowed_extensions,
         create_missing_program_folders=bool(raw.get("create_missing_program_folders", False)),
         unmatched_folder=sanitize_name(str(raw.get("unmatched_folder", "_email_downloads_needs_program"))),

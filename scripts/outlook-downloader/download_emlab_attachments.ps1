@@ -13,7 +13,7 @@ $DefaultConfig = [ordered]@{
   subject_keyword = 'EM tests'
   lookback_days = 7
   max_saved_files = 20
-  allowed_senders = @()
+  allowed_senders = @('rajput@fev.com', 'tandulkar@fev.com')
   allowed_extensions = @('.pdf', '.xlsm')
   create_missing_program_folders = $false
   unmatched_folder = '_email_downloads_needs_program'
@@ -24,6 +24,8 @@ $DefaultConfig = [ordered]@{
   }
   dry_run = $false
 }
+
+$ProductionAllowedSenders = @('rajput@fev.com', 'tandulkar@fev.com')
 
 function Write-DefaultConfigIfMissing([string]$Path) {
   if (Test-Path -LiteralPath $Path) { return }
@@ -157,10 +159,18 @@ function Resolve-ProgramFolder($ConfigData, [string]$AttachmentName) {
 }
 
 function Assert-AllowedSendersConfigured($ConfigData) {
-  $senders = @($ConfigData.allowed_senders) | Where-Object { [string]$_ -and ([string]$_).Trim() }
+  $senders = @($ProductionAllowedSenders) | Where-Object { [string]$_ -and ([string]$_).Trim() }
   if ($senders.Count -eq 0) {
     throw 'allowed_senders must contain at least one exact sender email before Outlook automation is enabled.'
   }
+}
+
+function Get-AllowedSenders() {
+  $map = @{}
+  foreach ($sender in @($ProductionAllowedSenders)) {
+    if ([string]$sender) { $map[([string]$sender).Trim().ToLowerInvariant()] = $true }
+  }
+  $map
 }
 
 function Get-UniquePath([string]$Destination) {
@@ -229,10 +239,7 @@ try {
     if (-not $ext.StartsWith('.')) { $ext = ".$ext" }
     $allowedExtensions[$ext] = $true
   }
-  $allowedSenders = @{}
-  foreach ($sender in @($configData.allowed_senders)) {
-    if ([string]$sender) { $allowedSenders[([string]$sender).Trim().ToLowerInvariant()] = $true }
-  }
+  $allowedSenders = Get-AllowedSenders
 
   $cutoff = (Get-Date).AddDays(-[int]$configData.lookback_days)
   $limit = if ($MaxFiles -gt 0) { $MaxFiles } elseif ([int]$configData.max_saved_files -gt 0) { [int]$configData.max_saved_files } else { 0 }
