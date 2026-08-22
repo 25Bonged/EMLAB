@@ -7,6 +7,7 @@ export interface Settings {
   port: number
   scanIntervalSeconds: number
   dashboardDist: string
+  outlookDownloader?: string
 }
 
 export function loadSettings(overrides: Partial<Settings> = {}): Settings {
@@ -21,8 +22,9 @@ export function loadSettings(overrides: Partial<Settings> = {}): Settings {
     watchFolder: resolve(process.env.EMLAB_WATCH_FOLDER ?? (raw.watch_folder as string) ?? './watch'),
     databasePath: resolve(process.env.EMLAB_DATABASE_PATH ?? (raw.database_path as string) ?? './data/emissions.db'),
     port: Number(process.env.EMLAB_PORT ?? raw.port ?? 8000),
-    scanIntervalSeconds: Number(process.env.EMLAB_SCAN_INTERVAL ?? raw.scan_interval_seconds ?? 3),
+    scanIntervalSeconds: Number(process.env.EMLAB_SCAN_INTERVAL ?? raw.scan_interval_seconds ?? 15),
     dashboardDist: resolve((raw.dashboard_dist as string) ?? './dist'),
+    outlookDownloader: raw.outlook_downloader ? resolve(String(raw.outlook_downloader)) : undefined,
     ...overrides,
   }
 }

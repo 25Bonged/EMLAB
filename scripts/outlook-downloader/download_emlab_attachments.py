@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -23,6 +24,10 @@ OUTLOOK_INBOX = 6
 MAIL_ITEM_CLASS = 43
 DEFAULT_CONFIG_FILE = Path(__file__).with_name("config.json")
 PRODUCTION_ALLOWED_SENDERS = {"rajput@fev.com", "tandulkar@fev.com"}
+DEFAULT_PROJECT_RULES = {
+    "STLA": ["CITROEN", "AIRCROSS"],
+    "RNTBCI": ["RNTBCI", "DUSTER", "TRIBER", "HR10", "HR13", "RBC", "R1324"],
+}
 DEFAULT_CONFIG: dict[str, Any] = {
     "output_root": r"%APPDATA%\EMLAB\Programs",
     "subject_keyword": "EM tests",
@@ -33,10 +38,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "create_missing_program_folders": False,
     "unmatched_folder": "_email_downloads_needs_program",
     "route_layout": "project/transmission/vehicle",
-    "project_rules": {
-        "STLA": ["CITROEN", "AIRCROSS"],
-        "RNTBCI": ["RNTBCI", "DUSTER", "TRIBER", "HR10", "HR13", "RBC", "R1324"],
-    },
+    "project_rules": DEFAULT_PROJECT_RULES,
     "dry_run": False,
 }
 
@@ -73,9 +75,18 @@ def load_config(config_file: Path) -> Config:
         for ext in raw.get("allowed_extensions", [".pdf", ".xlsm"])
     }
 
+    raw_rules: dict[str, Any] = dict(DEFAULT_PROJECT_RULES)
+    for project, keywords in dict(raw.get("project_rules", {})).items():
+        merged = list(raw_rules.get(str(project), []))
+        if isinstance(keywords, list):
+            for keyword in keywords:
+                if str(keyword).strip() and str(keyword) not in merged:
+                    merged.append(str(keyword))
+        raw_rules[str(project)] = merged
+
     project_rules = {
         sanitize_name(str(project)): [normalize_key(str(keyword)) for keyword in keywords if str(keyword).strip()]
-        for project, keywords in dict(raw.get("project_rules", {})).items()
+        for project, keywords in raw_rules.items()
         if str(project).strip() and isinstance(keywords, list)
     }
 
@@ -241,6 +252,44 @@ def generate_unique_path(destination: Path) -> Path:
         counter += 1
 
 
+def repair_holding_folder(config: Config) -> int:
+    moved = 0
+    holding_roots = []
+    for folder_name in (config.unmatched_folder, "email_downloads_needs_program", "_email_downloads_needs_program"):
+        candidate = config.output_root / sanitize_name(folder_name)
+        if candidate.exists() and candidate not in holding_roots:
+            holding_roots.append(candidate)
+
+    files = [path for root in holding_roots for path in root.rglob("*") if path.is_file()]
+    groups: dict[str, list[Path]] = {}
+    for file_path in files:
+        groups.setdefault(strip_known_suffix(file_path.name), []).append(file_path)
+
+    for stem, group in groups.items():
+        pdf = next((path for path in group if path.name.upper().endswith("_REPORT.PDF")), None)
+        xlsm = next((path for path in group if path.name.upper().endswith("_TRACES.XLSM")), None)
+        if pdf is None or xlsm is None:
+            logging.warning("Holding folder still has incomplete pair for %s.", stem)
+            continue
+
+        route = route_parts(config, pdf.name)
+        if not route or route[0] == "UNKNOWN_PROJECT":
+            logging.warning("Holding folder pair still has unknown project: %s.", stem)
+            continue
+
+        destination_folder = (config.output_root / Path(*route)).resolve()
+        if any(root.resolve() in destination_folder.parents for root in holding_roots):
+            continue
+        destination_folder.mkdir(parents=True, exist_ok=True)
+        for source in (pdf, xlsm):
+            destination = generate_unique_path(destination_folder / source.name)
+            shutil.move(str(source), str(destination))
+            logging.info("Moved holding attachment into watched project folder: %s", destination)
+            moved += 1
+
+    return moved
+
+
 def processed_file(output_root: Path) -> Path:
     return output_root / "processed_outlook_messages.json"
 
@@ -320,6 +369,9 @@ def process_inbox(
         processed_ids = load_processed_ids(config.output_root)
         win32_client = import_outlook_client()
         logging.info("Connecting to Classic Outlook profile.")
+        repaired = repair_holding_folder(config)
+        if repaired:
+            logging.info("Repaired holding folder attachments: moved=%d", repaired)
         outlook = win32_client.Dispatch("Outlook.Application").GetNamespace("MAPI")
         messages = outlook.GetDefaultFolder(OUTLOOK_INBOX).Items
         messages.Sort("[ReceivedTime]", True)
@@ -443,6 +495,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Download EMLAB Outlook attachments into watched program folders.")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_FILE)
     parser.add_argument("--check-config", action="store_true", help="Validate config without connecting to Outlook.")
+    parser.add_argument("--repair-holding-only", action="store_true", help="Move complete holding-folder pairs into routed project folders without connecting to Outlook.")
     parser.add_argument("--route-filename", help="Print the folder route for one attachment name without connecting to Outlook.")
     parser.add_argument("--max-files", type=int, help="Stop after saving this many allowed PDF/XLSM attachments.")
     parser.add_argument("--dry-run", action="store_true", help="Read Outlook and log planned saves without saving attachments.")
@@ -456,6 +509,12 @@ def main() -> int:
             return 0
         if args.route_filename:
             print(Path(*route_parts(config, args.route_filename)))
+            return 0
+        if args.repair_holding_only:
+            config.output_root.mkdir(parents=True, exist_ok=True)
+            configure_logging(config.output_root)
+            moved = repair_holding_folder(config)
+            print(f"Repair OK: moved={moved}")
             return 0
 
         process_inbox(config, args.max_files, True if args.dry_run else None)

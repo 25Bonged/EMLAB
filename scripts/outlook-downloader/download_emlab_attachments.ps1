@@ -1,6 +1,7 @@
 param(
   [string]$Config = (Join-Path $PSScriptRoot 'config.json'),
   [switch]$CheckConfig,
+  [switch]$RepairHoldingOnly,
   [string]$RouteFilename,
   [int]$MaxFiles = 0,
   [switch]$DryRun
@@ -26,12 +27,35 @@ $DefaultConfig = [ordered]@{
 }
 
 $ProductionAllowedSenders = @('rajput@fev.com', 'tandulkar@fev.com')
+$DefaultProjectRules = [ordered]@{
+  STLA = @('CITROEN', 'AIRCROSS')
+  RNTBCI = @('RNTBCI', 'DUSTER', 'TRIBER', 'HR10', 'HR13', 'RBC', 'R1324')
+}
 
 function Write-DefaultConfigIfMissing([string]$Path) {
   if (Test-Path -LiteralPath $Path) { return }
   $dir = Split-Path -Parent $Path
   if ($dir) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
   $DefaultConfig | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Merge-ProjectRules($ConfigData) {
+  if (-not $ConfigData.PSObject.Properties['project_rules'] -or -not $ConfigData.project_rules) {
+    $ConfigData | Add-Member -MemberType NoteProperty -Name project_rules -Value ([pscustomobject]@{}) -Force
+  }
+  foreach ($project in $DefaultProjectRules.Keys) {
+    $existing = @()
+    if ($ConfigData.project_rules.PSObject.Properties[$project]) {
+      $existing = @($ConfigData.project_rules.$project)
+    }
+    $merged = [System.Collections.Generic.List[string]]::new()
+    foreach ($keyword in @($existing + $DefaultProjectRules[$project])) {
+      $text = ([string]$keyword).Trim()
+      if ($text -and -not $merged.Contains($text)) { [void]$merged.Add($text) }
+    }
+    $ConfigData.project_rules | Add-Member -MemberType NoteProperty -Name $project -Value ([string[]]$merged) -Force
+  }
+  $ConfigData
 }
 
 function Expand-ConfigPath([string]$Value) {
@@ -186,8 +210,59 @@ function Get-UniquePath([string]$Destination) {
   }
 }
 
+function Repair-HoldingFolder($ConfigData) {
+  $root = (Expand-ConfigPath ([string]$ConfigData.output_root))
+  $holdingRoots = @()
+  foreach ($folderName in @((Sanitize-Name ([string]$ConfigData.unmatched_folder)), 'email_downloads_needs_program', '_email_downloads_needs_program')) {
+    $candidate = Join-Path $root (Sanitize-Name $folderName)
+    if ((Test-Path -LiteralPath $candidate) -and -not ($holdingRoots -contains $candidate)) {
+      $holdingRoots += $candidate
+    }
+  }
+
+  $moved = 0
+  $files = @()
+  foreach ($holdingRoot in $holdingRoots) {
+    $files += @(Get-ChildItem -LiteralPath $holdingRoot -Recurse -File -ErrorAction SilentlyContinue)
+  }
+  foreach ($group in ($files | Group-Object { Strip-KnownSuffix $_.Name })) {
+    $pdf = @($group.Group | Where-Object { $_.Name.ToUpperInvariant().EndsWith('_REPORT.PDF') } | Select-Object -First 1)
+    $xlsm = @($group.Group | Where-Object { $_.Name.ToUpperInvariant().EndsWith('_TRACES.XLSM') } | Select-Object -First 1)
+    if ($pdf.Count -eq 0 -or $xlsm.Count -eq 0) {
+      Write-Log 'WARNING' "Holding folder still has incomplete pair for $($group.Name)." | Out-Null
+      continue
+    }
+
+    $parts = @(Get-RouteParts $ConfigData $pdf[0].Name)
+    if ($parts.Count -eq 0 -or $parts[0] -eq 'UNKNOWN_PROJECT') {
+      Write-Log 'WARNING' "Holding folder pair still has unknown project: $($group.Name)." | Out-Null
+      continue
+    }
+
+    $destinationFolder = Join-Parts $root $parts
+    $destFull = [System.IO.Path]::GetFullPath($destinationFolder)
+    $insideHolding = $false
+    foreach ($holdingRoot in $holdingRoots) {
+      $holdingFull = [System.IO.Path]::GetFullPath($holdingRoot)
+      if ($destFull.StartsWith($holdingFull + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        $insideHolding = $true
+      }
+    }
+    if ($insideHolding) { continue }
+
+    New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
+    foreach ($source in @($pdf[0], $xlsm[0])) {
+      $destination = Get-UniquePath (Join-Path $destinationFolder $source.Name)
+      Move-Item -LiteralPath $source.FullName -Destination $destination
+      Write-Log 'INFO' "Moved holding attachment into watched project folder: $destination" | Out-Null
+      $moved++
+    }
+  }
+  $moved
+}
+
 Write-DefaultConfigIfMissing $Config
-$configData = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
+$configData = Merge-ProjectRules (Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json)
 $outputRoot = Expand-ConfigPath ([string]$configData.output_root)
 
 if ($CheckConfig) {
@@ -206,6 +281,12 @@ $logDir = Join-Path $outputRoot 'logs'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $script:LogPath = Join-Path $logDir 'emlab_outlook_downloader.log'
 Assert-AllowedSendersConfigured $configData
+
+if ($RepairHoldingOnly) {
+  $repaired = Repair-HoldingFolder $configData
+  Write-Output "Repair OK: moved=$repaired"
+  exit 0
+}
 
 $lockPath = Join-Path $outputRoot 'emlab_outlook_downloader.lock'
 $lockStream = $null
@@ -227,6 +308,9 @@ try {
       Write-Log 'ERROR' "Could not read $processedPath`: $($_.Exception.Message)"
     }
   }
+
+  $repaired = Repair-HoldingFolder $configData
+  if ($repaired -gt 0) { Write-Log 'INFO' "Repaired holding folder attachments: moved=$repaired" }
 
   Write-Log 'INFO' 'Connecting to Classic Outlook profile.'
   $outlook = New-Object -ComObject Outlook.Application

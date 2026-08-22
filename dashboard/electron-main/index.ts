@@ -174,8 +174,13 @@ async function start(): Promise<void> {
     watchFolder,
     databasePath: path.join(userDataDir, 'emissions.db'),
     port: 0,
-    scanIntervalSeconds: 3,
+    scanIntervalSeconds: 15,
     dashboardDist: path.join(DASHBOARD_ROOT, 'dist'),
+    outlookDownloader: path.join(
+      app.isPackaged ? process.resourcesPath : path.dirname(DASHBOARD_ROOT),
+      app.isPackaged ? 'outlook-downloader' : 'scripts/outlook-downloader',
+      'run_emlab_downloader.bat',
+    ),
   }
 
   const db = new Database(settings.databasePath)

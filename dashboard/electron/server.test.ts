@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -16,13 +16,14 @@ function sampleTest(overrides: Record<string, any> = {}) {
 }
 
 describe('server', () => {
-  let dir: string, db: Database, watcher: FolderWatcher, app: ReturnType<typeof createServer>
+  let dir: string, db: Database, watcher: FolderWatcher, app: ReturnType<typeof createServer>, parse: Mock
 
   beforeEach(() => {
     dir = mkdtempSync(path.join(tmpdir(), 'emlab-srv-'))
     mkdirSync(path.join(dir, 'watch'))
     db = new Database(path.join(dir, 'test.db'))
-    watcher = new FolderWatcher({ watchFolder: path.join(dir, 'watch'), scanIntervalSeconds: 1 }, db, async () => sampleTest())
+    parse = vi.fn(async () => sampleTest())
+    watcher = new FolderWatcher({ watchFolder: path.join(dir, 'watch'), scanIntervalSeconds: 1 }, db, parse)
     app = createServer(db, watcher, {
       watchFolder: path.join(dir, 'watch'), databasePath: path.join(dir, 'test.db'),
       port: 0, scanIntervalSeconds: 1, dashboardDist: path.join(dir, 'nonexistent-dist'),
@@ -194,6 +195,23 @@ describe('server', () => {
     const jobs = (await (await app.request('/api/ingestion')).json()) as any[]
     expect(jobs).toHaveLength(1)
     expect(jobs[0].status).toBe('pending_pair')
+  })
+
+  it('runs the configured Outlook downloader before rescanning', async () => {
+    const prog = db.createProgram('P', path.join(dir, 'watch', 'P'))
+    mkdirSync(prog.folder)
+    const runner = path.join(dir, 'outlook.bat')
+    writeFileSync(runner, `@echo off\r\necho x>"${path.join(prog.folder, 'mail_REPORT.pdf')}"\r\necho y>"${path.join(prog.folder, 'mail_TRACES.xlsm')}"\r\n`)
+    app = createServer(db, watcher, {
+      watchFolder: path.join(dir, 'watch'), databasePath: path.join(dir, 'test.db'),
+      port: 0, scanIntervalSeconds: 1, dashboardDist: path.join(dir, 'nonexistent-dist'),
+      outlookDownloader: runner,
+    })
+
+    const res = await app.request('/api/ingestion/rescan', { method: 'POST' })
+    expect(res.status).toBe(200)
+    expect(parse).toHaveBeenCalledTimes(1)
+    expect(db.listTests()).toHaveLength(1)
   })
 
   it('exports an xlsx workbook', async () => {

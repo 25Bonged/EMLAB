@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { serveStatic } from '@hono/node-server/serve-static'
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import type { Database } from './db.ts'
 import type { FolderWatcher } from './watcher.ts'
@@ -24,6 +25,7 @@ const MN_CLASSES = new Set(['M1_M2', 'N1_I', 'N1_II', 'N1_III', 'N2'])
 const IGNITIONS = new Set(['PI', 'CI'])
 const OBD_STAGES = new Set(['OBD-I', 'OBD-II'])
 const POLLUTANTS = new Set(['CO', 'THC', 'NOx', 'CO2', 'CH4', 'NMHC', 'PM', 'PN'])
+const OUTLOOK_SYNC_TIMEOUT_MS = 120_000
 
 function isLoopbackOrigin(origin: string): boolean {
   try {
@@ -50,6 +52,38 @@ function isPlainRecord(value: unknown): value is Record<string, any> {
 
 function validFiniteNumber(value: unknown, min = -Infinity, max = Infinity): boolean {
   return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+}
+
+function runOutlookDownloader(settings: Settings): Promise<{ ran: boolean; message: string }> {
+  const runner = settings.outlookDownloader
+  if (!runner || !fs.existsSync(runner)) return Promise.resolve({ ran: false, message: 'Outlook downloader not configured' })
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('cmd.exe', ['/d', '/c', 'call', runner], {
+      cwd: path.dirname(runner),
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let output = ''
+    const collect = (chunk: Buffer) => {
+      output = `${output}${chunk.toString('utf8')}`.slice(-4000)
+    }
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(new Error(`Outlook sync timed out after ${OUTLOOK_SYNC_TIMEOUT_MS / 1000}s`))
+    }, OUTLOOK_SYNC_TIMEOUT_MS)
+    child.stdout.on('data', collect)
+    child.stderr.on('data', collect)
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('exit', (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve({ ran: true, message: output.trim() })
+      else reject(new Error(`Outlook sync failed with exit code ${code}: ${output.trim()}`))
+    })
+  })
 }
 
 async function readJson(c: { req: { json: () => Promise<any> } }): Promise<{ ok: true; value: any } | { ok: false; detail: string }> {
@@ -207,7 +241,13 @@ export function createServer(
   }))
 
   app.get('/api/health', (c) =>
-    c.json({ ok: true, can_edit: true, watch_folder: settings.watchFolder, database: settings.databasePath }))
+    c.json({
+      ok: true,
+      can_edit: true,
+      watch_folder: settings.watchFolder,
+      database: settings.databasePath,
+      outlook_sync_available: Boolean(settings.outlookDownloader && fs.existsSync(settings.outlookDownloader)),
+    }))
 
   app.get('/api/tests', (c) => {
     const includeNonaccepted = c.req.query('include_nonaccepted') !== 'false'
@@ -336,8 +376,9 @@ export function createServer(
   app.get('/api/ingestion', (c) => c.json(db.listJobs()))
 
   app.post('/api/ingestion/rescan', async (c) => {
+    const outlook = await runOutlookDownloader(settings)
     await watcher.scanOnce()
-    return c.json({ ok: true, jobs: db.listJobs() })
+    return c.json({ ok: true, outlook, jobs: db.listJobs() })
   })
 
   app.get('/api/export.xlsx', async (c) => {

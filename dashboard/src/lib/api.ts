@@ -23,6 +23,7 @@ export interface Health {
   can_edit: boolean
   watch_folder: string
   database: string
+  outlook_sync_available?: boolean
 }
 
 export interface IngestionJob {
@@ -59,7 +60,7 @@ export const api = {
   approve: (id: string) => request<{ ok: true }>(`/tests/${id}/approve`, { method: 'POST' }),
   quarantine: (id: string) => request<{ ok: true }>(`/tests/${id}/quarantine`, { method: 'POST' }),
   remove: (id: string) => request<{ ok: true }>(`/tests/${id}`, { method: 'DELETE' }),
-  rescan: () => request<{ ok: true }>('/ingestion/rescan', { method: 'POST' }),
+  rescan: () => request<{ ok: true; outlook?: { ran: boolean; message: string } }>('/ingestion/rescan', { method: 'POST' }),
   importParsed: (tests: Test[], programId?: string | null) =>
     request<{ count: number }>('/tests/import-parsed', { method: 'POST', body: JSON.stringify({ tests, program_id: programId ?? null }) }),
   // Downloads go through fetch rather than a plain <a href> so they can carry

@@ -28,7 +28,11 @@ export function Intake() {
           <Eyebrow>Daily intake · source evidence governance</Eyebrow>
           <h2 className="font-display page-title">FEV ingestion &amp; review</h2>
         </div>
-        {health?.can_edit && <button className="btn btn-primary" onClick={() => void rescan()}>Rescan OneDrive</button>}
+        {health?.can_edit && (
+          <button className="btn btn-primary" onClick={() => void rescan()}>
+            {health.outlook_sync_available ? 'Sync Outlook & rescan' : 'Rescan source'}
+          </button>
+        )}
       </div>
 
       <div className="intake-summary">

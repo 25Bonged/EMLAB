@@ -16,6 +16,10 @@ Production sender allowlist is fixed in the downloader:
 `rajput@fev.com` and `tandulkar@fev.com`. Messages from any other sender are
 ignored even if a local config file is edited.
 
+The app's intake button runs this downloader first, then rescans the watched
+folder. Each downloader run also repairs complete PDF/XLSM pairs that were
+previously saved into a legacy holding folder once their project route is known.
+
 ## Setup
 
 1. Run `run_emlab_downloader.bat` once. It creates the runtime config at
