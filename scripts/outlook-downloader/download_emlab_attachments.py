@@ -31,7 +31,7 @@ DEFAULT_PROJECT_RULES = {
 DEFAULT_CONFIG: dict[str, Any] = {
     "output_root": r"%APPDATA%\EMLAB\Programs",
     "subject_keyword": "EM tests",
-    "lookback_days": 7,
+    "lookback_days": 14,
     "max_saved_files": 20,
     "allowed_senders": sorted(PRODUCTION_ALLOWED_SENDERS),
     "allowed_extensions": [".pdf", ".xlsm"],
@@ -294,6 +294,39 @@ def processed_file(output_root: Path) -> Path:
     return output_root / "processed_outlook_messages.json"
 
 
+def last_run_file(output_root: Path) -> Path:
+    return output_root / "last_successful_run.json"
+
+
+def warn_if_gap_exceeds_lookback(output_root: Path, lookback_days: int) -> None:
+    path = last_run_file(output_root)
+    if not path.exists():
+        return
+    try:
+        completed_utc = datetime.fromisoformat(json.loads(path.read_text(encoding="utf-8"))["completed_utc"])
+    except (json.JSONDecodeError, OSError, KeyError, ValueError) as error:
+        logging.warning("Could not read %s: %s", path, error)
+        return
+    gap_days = (datetime.utcnow() - completed_utc.replace(tzinfo=None)).total_seconds() / 86400
+    if gap_days > lookback_days:
+        logging.warning(
+            "Gap since last successful run was %.1f day(s), longer than the %d-day lookback_days window. "
+            "Emails older than the lookback window were not scanned and will not be picked up automatically "
+            "-- check Outlook manually for that period if needed.",
+            gap_days,
+            lookback_days,
+        )
+
+
+def save_last_run(output_root: Path) -> None:
+    path = last_run_file(output_root)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps({"completed_utc": datetime.utcnow().isoformat() + "Z"}), encoding="utf-8"
+    )
+    temporary.replace(path)
+
+
 def load_processed_ids(output_root: Path) -> set[str]:
     path = processed_file(output_root)
     if not path.exists():
@@ -367,6 +400,7 @@ def process_inbox(
     lock = acquire_lock(config.output_root)
     try:
         processed_ids = load_processed_ids(config.output_root)
+        warn_if_gap_exceeds_lookback(config.output_root, config.lookback_days)
         win32_client = import_outlook_client()
         logging.info("Connecting to Classic Outlook profile.")
         repaired = repair_holding_folder(config)
@@ -487,6 +521,8 @@ def process_inbox(
             saved,
             max_saved_files,
         )
+        if not dry_run:
+            save_last_run(config.output_root)
     finally:
         release_lock(lock)
 

@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $DefaultConfig = [ordered]@{
   output_root = '%APPDATA%\EMLAB\Programs'
   subject_keyword = 'EM tests'
-  lookback_days = 7
+  lookback_days = 14
   max_saved_files = 20
   allowed_senders = @('rajput@fev.com', 'tandulkar@fev.com')
   allowed_extensions = @('.pdf', '.xlsm')
@@ -189,12 +189,38 @@ function Assert-AllowedSendersConfigured($ConfigData) {
   }
 }
 
+function Get-SenderSmtpAddress($Message) {
+  $raw = [string]$Message.SenderEmailAddress
+  $type = try { [string]$Message.SenderEmailType } catch { '' }
+  if ($type -ne 'EX') { return $raw }
+
+  try {
+    $PR_SMTP_ADDRESS = 'http://schemas.microsoft.com/mapi/proptag/0x39FE001E'
+    $smtp = $Message.PropertyAccessor.GetProperty($PR_SMTP_ADDRESS)
+    if ($smtp) { return [string]$smtp }
+  } catch { }
+
+  try {
+    $exUser = $Message.Sender.GetExchangeUser()
+    if ($exUser -and $exUser.PrimarySmtpAddress) { return [string]$exUser.PrimarySmtpAddress }
+  } catch { }
+
+  Write-Log 'WARNING' "Could not resolve SMTP address for Exchange sender (raw: $raw)."
+  $raw
+}
+
 function Get-AllowedSenders() {
   $map = @{}
   foreach ($sender in @($ProductionAllowedSenders)) {
     if ([string]$sender) { $map[([string]$sender).Trim().ToLowerInvariant()] = $true }
   }
   $map
+}
+
+function Save-ProcessedIds([string]$Path, $ProcessedMap) {
+  $tempPath = "$Path.tmp"
+  ([string[]]$ProcessedMap.Keys | Sort-Object | ConvertTo-Json) | Set-Content -LiteralPath $tempPath -Encoding UTF8
+  Move-Item -LiteralPath $tempPath -Destination $Path -Force
 }
 
 function Get-UniquePath([string]$Destination) {
@@ -312,6 +338,20 @@ try {
   $repaired = Repair-HoldingFolder $configData
   if ($repaired -gt 0) { Write-Log 'INFO' "Repaired holding folder attachments: moved=$repaired" }
 
+  $lastRunPath = Join-Path $outputRoot 'last_successful_run.json'
+  if (Test-Path -LiteralPath $lastRunPath) {
+    try {
+      $lastRunRaw = (Get-Content -LiteralPath $lastRunPath -Raw | ConvertFrom-Json).completed_utc
+      $lastRunUtc = [datetime]::Parse([string]$lastRunRaw, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+      $gap = (Get-Date).ToUniversalTime() - $lastRunUtc
+      if ($gap.TotalDays -gt [int]$configData.lookback_days) {
+        Write-Log 'WARNING' ("Gap since last successful run was {0:N1} day(s), longer than the {1}-day lookback_days window. Emails older than the lookback window were not scanned and will not be picked up automatically -- check Outlook manually for that period if needed." -f $gap.TotalDays, [int]$configData.lookback_days)
+      }
+    } catch {
+      Write-Log 'WARNING' "Could not read $lastRunPath`: $($_.Exception.Message)"
+    }
+  }
+
   Write-Log 'INFO' 'Connecting to Classic Outlook profile.'
   $outlook = New-Object -ComObject Outlook.Application
   $messages = $outlook.GetNamespace('MAPI').GetDefaultFolder(6).Items
@@ -340,7 +380,7 @@ try {
       if ([datetime]$message.ReceivedTime -lt $cutoff) { break }
       $subject = [string]$message.Subject
       if ($subject.ToLowerInvariant().IndexOf(([string]$configData.subject_keyword).ToLowerInvariant()) -lt 0) { continue }
-      $senderAddress = ([string]$message.SenderEmailAddress).Trim().ToLowerInvariant()
+      $senderAddress = (Get-SenderSmtpAddress $message).Trim().ToLowerInvariant()
       if ($allowedSenders.Count -gt 0 -and -not $allowedSenders.ContainsKey($senderAddress)) { continue }
       $entryId = [string]$message.EntryID
       if ($processed.ContainsKey($entryId)) { continue }
@@ -348,6 +388,7 @@ try {
       $matched++
       $savedFromMessage = 0
       $completePairs = 0
+      $limitReached = $false
       $candidates = @()
       for ($i = 1; $i -le $message.Attachments.Count; $i++) {
         $attachment = $message.Attachments.Item($i)
@@ -390,7 +431,8 @@ try {
 
         $newFiles = @($planned | Where-Object { -not $_.Exists }).Count
         if ($limit -gt 0 -and ($saved + $newFiles) -gt $limit) {
-          Write-Log 'WARNING' "Skipped complete attachment set for $($group.Name) because max_saved_files would be exceeded."
+          Write-Log 'WARNING' "Skipped complete attachment set for $($group.Name) because max_saved_files would be exceeded. Will retry next run."
+          $limitReached = $true
           break
         }
 
@@ -414,12 +456,14 @@ try {
         }
       }
 
-      $processed[$entryId] = $true
-      if (-not $effectiveDryRun) {
-        ([string[]]$processed.Keys | Sort-Object | ConvertTo-Json) | Set-Content -LiteralPath $processedPath -Encoding UTF8
+      if (-not $limitReached) {
+        $processed[$entryId] = $true
+        if (-not $effectiveDryRun) {
+          Save-ProcessedIds $processedPath $processed
+        }
       }
       if ($candidates.Count -eq 0) { Write-Log 'WARNING' 'Matched message had no allowed PDF/XLSM attachments.' }
-      elseif ($completePairs -eq 0) { Write-Log 'WARNING' 'Matched message had allowed attachments, but no complete PDF/XLSM pair.' }
+      elseif ($completePairs -eq 0 -and -not $limitReached) { Write-Log 'WARNING' 'Matched message had allowed attachments, but no complete PDF/XLSM pair.' }
     } catch {
       Write-Log 'ERROR' "Failed while processing an Outlook message: $($_.Exception.Message)"
     }
@@ -427,6 +471,11 @@ try {
 
   $limitText = if ($limit -gt 0) { [string]$limit } else { '' }
   Write-Log 'INFO' "Completed. inspected=$inspected matched=$matched attachments_saved=$saved max_saved_files=$limitText"
+  if (-not $effectiveDryRun) {
+    $lastRunTemp = "$lastRunPath.tmp"
+    (@{ completed_utc = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json) | Set-Content -LiteralPath $lastRunTemp -Encoding UTF8
+    Move-Item -LiteralPath $lastRunTemp -Destination $lastRunPath -Force
+  }
 } finally {
   if ($lockStream) { $lockStream.Close() }
   Remove-Item -LiteralPath $lockPath -ErrorAction SilentlyContinue
