@@ -1,7 +1,7 @@
 {
   "name": "dashboard",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Emissions test dashboard",
   "author": "vehiclelab",
   "type": "module",
